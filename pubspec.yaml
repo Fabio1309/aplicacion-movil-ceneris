@@ -1,0 +1,51 @@
+name: assistenciaceneris_app
+description: "A new Flutter project."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0' # Es una buena práctica definir un rango más específico
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # --- TUS DEPENDENCIAS DE PAQUETES VAN AQUÍ ---
+  cupertino_icons: ^1.0.8
+  firebase_core: ^2.32.0
+  cloud_firestore: ^4.17.5
+  geolocator: ^12.0.0 # He actualizado versiones antiguas
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  device_info_plus: ^10.1.0
+  flutter_security_checker: ^3.2.1
+  connectivity_plus: ^6.0.3
+  geodesy: ^0.10.2
+  # firebase_functions es muy antiguo y no es necesario para la app móvil, lo he quitado
+  # si lo necesitas para un futuro, usa la versión más reciente
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0 # Versión actualizada
+  flutter_launcher_icons: ^0.14.4
+
+
+flutter_launcher_icons:
+   android: "launcher_icon" # Nombre del icono para Android
+   ios: true # Generar iconos para iOS
+   image_path: "assets/logo/logo.png" # Ruta a tu imagen de alta resolución
+   min_sdk_android: 21 # La versión mínima de SDK que establecimos antes
+
+# ==========================================================
+# LA SECCIÓN DE FLUTTER - AQUÍ VAN LAS CONFIGURACIONES
+# ==========================================================
+flutter:
+  # La siguiente línea asegura que la fuente Material Icons esté incluida.
+  uses-material-design: true
+
+  # Para añadir assets a tu aplicación, añade una sección de assets aquí.
+  assets:
+    - assets/images/ # Esto le dice a Flutter que incluya todo lo de esta carpeta
+

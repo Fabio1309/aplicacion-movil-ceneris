@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "646468017816",
+    "project_id": "asistenciaceneris-app",
+    "storage_bucket": "asistenciaceneris-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:646468017816:android:b47c8202e226e127a0baed",
+        "android_client_info": {
+          "package_name": "com.example.assistenciaceneris_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAjKs83Gl3FF3OKu1EWrMOIyamhUSfyuNs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
