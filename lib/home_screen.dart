@@ -1,7 +1,12 @@
+// lib/home_screen.dart
+
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:assistenciaceneris_app/login_screen.dart'; // Ajusta la ruta si es necesario
 import 'app_colors.dart';
 import 'package:geodesy/geodesy.dart';
 import 'package:hive/hive.dart';
@@ -11,7 +16,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 class HomeScreen extends StatefulWidget {
   final String dni;
   final String nombre;
-  final String area; // <-- AÑADE ESTA LÍNEA
+  final String area;
 
   const HomeScreen({
     super.key,
@@ -25,47 +30,34 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  String _statusMessage = 'Presiona para marcar tu asistencia';
-  bool _isLoading = false;
+  String _statusMessage = 'Cargando...';
+  bool _isLoading = true;
   String? _deviceId;
   List<Map<String, dynamic>> _allowedLocations = [];
+  String _lastMarkingType = 'Salida';
 
   @override
   void initState() {
     super.initState();
-    _loadAllowedLocations();
+    _initializeScreen();
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (_deviceId == null) {
-      _getDeviceId();
-    }
-  }
-
-  Future<void> _loadAllowedLocations() async {
-    try {
-      final querySnapshot =
-          await FirebaseFirestore.instance.collection('ubicaciones').get();
-      final locations = querySnapshot.docs.map((doc) => doc.data()).toList();
-      setState(() {
-        _allowedLocations = locations;
-      });
-      print("Ubicaciones permitidas cargadas: ${_allowedLocations.length}");
-    } catch (e) {
-      print("Error al cargar ubicaciones: $e");
+  Future<void> _initializeScreen() async {
+    await _getDeviceId();
+    await _loadAllowedLocations();
+    await _fetchLastMarkingState();
+    if (mounted) {
+      setState(() => _isLoading = false);
     }
   }
 
   Future<void> _getDeviceId() async {
     final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
     try {
-      final platform = Theme.of(context).platform;
-      if (platform == TargetPlatform.android) {
+      if (Platform.isAndroid) {
         final AndroidDeviceInfo androidInfo = await deviceInfo.androidInfo;
         _deviceId = androidInfo.id;
-      } else if (platform == TargetPlatform.iOS) {
+      } else if (Platform.isIOS) {
         final IosDeviceInfo iosInfo = await deviceInfo.iosInfo;
         _deviceId = iosInfo.identifierForVendor;
       }
@@ -74,192 +66,128 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _logFraudulentAttempt({
-    required String reason,
-    Position? position,
-  }) async {
-    if (_deviceId == null) {
-      print("No se puede registrar intento de fraude: falta deviceId");
-      return;
-    }
-    final fraudData = {
-      'timestamp': FieldValue.serverTimestamp(),
-      'deviceId': _deviceId,
-      'userDni': widget.dni,
-      'userName': widget.nombre,
-      'reason': reason,
-      'reportedLatitude': position?.latitude,
-      'reportedLongitude': position?.longitude,
-    };
+  Future<void> _loadAllowedLocations() async {
     try {
-      await FirebaseFirestore.instance
-          .collection('asistencias_fraudulentas')
-          .add(fraudData);
-      print("Intento de fraude registrado con éxito en Firestore.");
-    } on FirebaseException catch (e) {
-      print("ERROR DE FIREBASE al registrar fraude: ${e.code} - ${e.message}");
+      final querySnapshot =
+          await FirebaseFirestore.instance.collection('ubicaciones').get();
+      final locations = querySnapshot.docs.map((doc) {
+        final data = doc.data();
+        data['id'] = doc.id;
+        return data;
+      }).toList();
+      if (mounted) {
+        setState(() {
+          _allowedLocations = locations;
+        });
+      }
     } catch (e) {
-      print("Error DESCONOCIDO al registrar intento de fraude: $e");
+      print("Error al cargar ubicaciones: $e");
     }
   }
 
-  Future<void> _handleMarkAttendance() async {
+  Future<void> _fetchLastMarkingState() async {
+    try {
+      final now = DateTime.now();
+      final startOfDay = DateTime(now.year, now.month, now.day);
+      final querySnapshot = await FirebaseFirestore.instance
+        .collection('asistencias')
+        .where('userDni', isEqualTo: widget.dni)
+        .where('timestamp', isGreaterThanOrEqualTo: startOfDay)
+        .orderBy('timestamp', descending: true)
+        .limit(1)
+        .get();
+
+      String newStatusMessage;
+      String newLastMarkingType = 'Salida';
+      if (querySnapshot.docs.isNotEmpty) {
+        final lastMarking = querySnapshot.docs.first.data();
+        newLastMarkingType = lastMarking['tipoMarcacion'] ?? 'Salida';
+      }
+      newStatusMessage = newLastMarkingType == 'Entrada'
+          ? '✅ DENTRO. Marca tu salida.'
+          : 'Bienvenido. Marca tu entrada.';
+      if(mounted){
+        setState(() {
+          _lastMarkingType = newLastMarkingType;
+          _statusMessage = newStatusMessage;
+        });
+      }
+    } catch (e) {
+      print("Error al obtener el último estado: $e");
+      if(mounted){
+        setState(() => _statusMessage = 'Error al verificar estado.');
+      }
+    }
+  }
+
+  Future<void> _markAttendance(String markingType) async {
     setState(() {
       _isLoading = true;
       _statusMessage = 'Iniciando verificación...';
     });
 
     try {
-      // 1. VERIFICAMOS LA CONEXIÓN Y OBTENEMOS DATOS DEL TRABAJADOR SI HAY INTERNET
       final connectivityResult = await Connectivity().checkConnectivity();
-      final hasInternet =
-          connectivityResult.contains(ConnectivityResult.mobile) ||
-              connectivityResult.contains(ConnectivityResult.wifi);
-
+      final hasInternet = connectivityResult.contains(ConnectivityResult.mobile) || connectivityResult.contains(ConnectivityResult.wifi);
       List<dynamic> ubicacionesPermitidasDelTrabajador = [];
+
       if (hasInternet) {
-        setState(() {
-          _statusMessage = 'Verificando datos de trabajador...';
-        });
-        final trabajadorSnap = await FirebaseFirestore.instance
-            .collection('trabajadores')
-            .doc(widget.dni)
-            .get();
+        final trabajadorSnap = await FirebaseFirestore.instance.collection('trabajadores').doc(widget.dni).get();
+        if (!trabajadorSnap.exists || !(trabajadorSnap.data()?['activo'] ?? false)) {
+          if(mounted) setState(() { _statusMessage = '❌ ERROR: Trabajador no encontrado o inactivo.'; });
+          return;
+        }
 
-        if (!trabajadorSnap.exists ||
-            !(trabajadorSnap.data()?['activo'] ?? false)) {
-          setState(() {
-            _statusMessage = '❌ ERROR: Trabajador no encontrado o inactivo.';
-          });
-          return;
+        final deviceDoc = await FirebaseFirestore.instance.collection('dispositivos').doc(_deviceId).get();
+        if (!deviceDoc.exists) {
+            final newDeviceName = 'Dispositivo de ${widget.nombre}';
+            await FirebaseFirestore.instance.collection('dispositivos').doc(_deviceId).set({
+                'nombreDispositivo': newDeviceName,
+                'creadoEn': FieldValue.serverTimestamp(),
+                'trabajadoresPermitidos': [widget.dni]
+            });
+            print('Dispositivo nuevo registrado como "$newDeviceName" y asignado a ${widget.dni}');
+        } else {
+            final trabajadoresPermitidos = deviceDoc.data()?['trabajadoresPermitidos'] as List<dynamic>? ?? [];
+            if (!trabajadoresPermitidos.contains(widget.dni)) {
+                if(mounted) setState(() { _statusMessage = '❌ ERROR: No tienes permiso para marcar en este dispositivo.'; });
+                return;
+            }
         }
-        if (_deviceId != trabajadorSnap.data()?['deviceIdVinculado']) {
-          setState(() {
-            _statusMessage =
-                '❌ ERROR: Dispositivo no autorizado para este DNI.';
-          });
-          return;
-        }
-        ubicacionesPermitidasDelTrabajador =
-            trabajadorSnap.data()?['ubicacionesPermitidas'] ?? [];
+        
+        ubicacionesPermitidasDelTrabajador = trabajadorSnap.data()?['ubicacionesPermitidas'] ?? [];
         if (ubicacionesPermitidasDelTrabajador.isEmpty) {
-          setState(() {
-            _statusMessage = '❌ ERROR: No tiene ubicaciones asignadas.';
-          });
-          return;
-        }
-      } else {
-        setState(() {
-          _statusMessage = '🔌 Operando en modo sin conexión...';
-        });
-      }
-
-      // 2. VALIDACIONES LOCALES (SEGURIDAD Y PERMISOS)
-      setState(() {
-        _statusMessage = 'Comprobando seguridad del dispositivo...';
-      });
-      final isRooted = await FlutterSecurityChecker.isRooted;
-      if (isRooted) {
-        await _logFraudulentAttempt(reason: 'Dispositivo rooteado');
-        setState(() {
-          _statusMessage = '❌ ERROR: Configuración de seguridad no permitida.';
-        });
-        return;
-      }
-
-      setState(() {
-        _statusMessage = 'Obteniendo ubicación...';
-      });
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          setState(() {
-            _statusMessage = '❌ ERROR: Permiso de ubicación denegado.';
-          });
+          if(mounted) setState(() { _statusMessage = '❌ ERROR: No tiene ubicaciones asignadas.'; });
           return;
         }
       }
-      if (permission == LocationPermission.deniedForever) {
-        setState(() {
-          _statusMessage =
-              '❌ ERROR: Permiso de ubicación denegado permanentemente.';
-        });
-        return;
-      }
 
-      Position currentPosition;
-      try {
-        currentPosition = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high,
-          timeLimit: const Duration(seconds: 20),
-        );
-      } catch (e) {
-        setState(() {
-          _statusMessage = '❌ ERROR: No se pudo obtener la ubicación a tiempo.';
-        });
-        return;
-      }
-
-      if (currentPosition.isMocked) {
-        await _logFraudulentAttempt(
-          reason: 'Ubicación simulada detectada',
-          position: currentPosition,
-        );
-        setState(() {
-          _statusMessage =
-              '⚠️ Estas intentando falsificar tu ubicacion, desactivalo y vuelve a intentarlo.';
-        });
-        return;
-      }
-
-      // 3. LÓGICA DE VALIDACIÓN DE UBICACIÓN
+      Position currentPosition = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      
       bool isWithinAllowedLocation = false;
       String locationName = "Ubicación desconocida";
 
       if (!hasInternet) {
-        // MODO OFFLINE: Se asume que la ubicación es válida para procesar después.
         isWithinAllowedLocation = true;
         locationName = "Ubicación no verificada (sin conexión)";
       } else {
-        // MODO ONLINE: Se realiza la validación completa.
-        if (_allowedLocations.isEmpty) {
-          setState(() {
-            _statusMessage =
-                '❌ ERROR: No se pudieron cargar las ubicaciones del sistema.';
-          });
-          return;
-        }
-
+        final LatLng userLocation = LatLng(currentPosition.latitude, currentPosition.longitude);
         final Geodesy geodesy = Geodesy();
-        final LatLng userLocation =
-            LatLng(currentPosition.latitude, currentPosition.longitude);
-
         for (var location in _allowedLocations) {
-          final String currentLocationName = location['nombre'];
-
-          if (!ubicacionesPermitidasDelTrabajador
-              .contains(currentLocationName)) {
-            continue; // Esta ubicación no está en la lista personal del trabajador, la saltamos.
+          if (!ubicacionesPermitidasDelTrabajador.contains(location['id'])) {
+            continue;
           }
-
-          // Primero, intentamos validar por polígono
-          if (location['limites'] != null &&
-              (location['limites'] as List).isNotEmpty) {
+          if (location['limites'] != null && (location['limites'] as List).isNotEmpty) {
             final List<LatLng> polygonPoints = (location['limites'] as List)
-                .map<LatLng>((p) => LatLng(
-                    (p['lat'] as num).toDouble(), (p['lng'] as num).toDouble()))
+                .map<LatLng>((p) => LatLng((p['lat'] as num).toDouble(), (p['lng'] as num).toDouble()))
                 .toList();
-            if (polygonPoints.length >= 3 &&
-                geodesy.isGeoPointInPolygon(userLocation, polygonPoints)) {
+            if (polygonPoints.length >= 3 && geodesy.isGeoPointInPolygon(userLocation, polygonPoints)) {
               isWithinAllowedLocation = true;
-              locationName = currentLocationName;
+              locationName = location['nombre'];
               break;
             }
           }
-          // Si no hay polígono, intentamos validar por radio
-          else if (location['latitud'] != null &&
-              location['longitud'] != null) {
+          else if (location['latitud'] != null && location['longitud'] != null) {
             final double distance = Geolocator.distanceBetween(
                 (location['latitud'] as num).toDouble(),
                 (location['longitud'] as num).toDouble(),
@@ -267,24 +195,16 @@ class _HomeScreenState extends State<HomeScreen> {
                 currentPosition.longitude);
             if (distance <= (location['radio'] as num? ?? 30.0).toDouble()) {
               isWithinAllowedLocation = true;
-              locationName = currentLocationName;
+              locationName = location['nombre'];
               break;
             }
           }
         }
       }
 
-      // 4. LÓGICA DE GUARDADO FINAL
       if (isWithinAllowedLocation) {
-        if (_deviceId == null) {
-          setState(() {
-            _statusMessage =
-                '❌ ERROR: No se pudo obtener el ID del dispositivo.';
-          });
-          return;
-        }
-
         final attendanceData = {
+          'tipoMarcacion': markingType,
           'latitude': currentPosition.latitude,
           'longitude': currentPosition.longitude,
           'deviceId': _deviceId,
@@ -295,49 +215,79 @@ class _HomeScreenState extends State<HomeScreen> {
           'status': hasInternet ? 'success' : 'pending_sync',
           'locationName': locationName,
         };
-
         if (hasInternet) {
-          setState(() {
-            _statusMessage = '✅ Conectado. Guardando en la nube...';
+          await FirebaseFirestore.instance.collection('asistencias').add({
+            ...attendanceData,
+            'timestamp': FieldValue.serverTimestamp(),
           });
-          try {
-            await FirebaseFirestore.instance.collection('asistencias').add({
-              ...attendanceData,
-              'timestamp': FieldValue.serverTimestamp(),
-            });
-            setState(() {
-              _statusMessage = '✅ ¡Asistencia registrada con éxito en la nube!';
-            });
-          } on FirebaseException catch (e) {
-            print(
-                "Error de Firebase, guardando en Hive como respaldo: ${e.message}");
-            setState(() {
-              _statusMessage = '❌ Error de red, guardando localmente...';
-            });
-            await Hive.box('asistencias_pendientes').add(attendanceData);
-          }
         } else {
           await Hive.box('asistencias_pendientes').add(attendanceData);
+        }
+        if (mounted) {
           setState(() {
-            _statusMessage =
-                '✅ ¡Asistencia guardada! Se sincronizará cuando tengas conexión.';
+            _lastMarkingType = markingType;
+            _statusMessage = markingType == 'Entrada'
+                ? '✅ ENTRADA REGISTRADA. ¡Buen trabajo!'
+                : '✅ SALIDA REGISTRADA. ¡Hasta pronto!';
           });
         }
       } else {
-        setState(() {
-          _statusMessage =
-              '❌ ESTÁS FUERA DE CUALQUIER ÁREA DE TRABAJO PERMITIDA.';
-        });
+        if (mounted) {
+          setState(() {
+            _statusMessage = '❌ ESTÁS FUERA DE CUALQUIER ÁREA DE TRABAJO PERMITIDA.';
+          });
+        }
       }
     } catch (e) {
-      setState(() {
-        _statusMessage = '❌ Ocurrió un error inesperado: ${e.toString()}';
-      });
+      if (mounted) {
+        setState(() {
+          _statusMessage = '❌ Ocurrió un error inesperado.';
+        });
+      }
+      print("Error en _markAttendance: $e");
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
+  }
+
+  Future<void> _logout() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const LoginScreen()),
+        (Route<dynamic> route) => false,
+      );
+    }
+  }
+
+  void _showLogoutConfirmationDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Cerrar Sesión'),
+          content: const Text('¿Estás seguro de que quieres salir?'),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancelar'),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            TextButton(
+              child: const Text('Salir'),
+              onPressed: () {
+                Navigator.of(context).pop();
+                _logout();
+              },
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -349,6 +299,13 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: Colors.white,
         foregroundColor: AppColors.text,
         elevation: 1,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.exit_to_app),
+            tooltip: 'Cerrar Sesión',
+            onPressed: _showLogoutConfirmationDialog,
+          ),
+        ],
       ),
       body: SafeArea(
         child: Center(
@@ -358,87 +315,64 @@ class _HomeScreenState extends State<HomeScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // --- Logo de la Empresa ---
-                Image.asset(
-                  'assets/images/image.png', // Asegúrate de que el nombre del archivo sea correcto
-                  height: 80,
-                ),
+                Image.asset('assets/images/image.png', height: 80),
                 const SizedBox(height: 24),
-
-                // --- Título Principal ---
-                const Text(
-                  'Control de Asistencia',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.primary,
-                  ),
-                ),
+                const Text('Control de Asistencia', textAlign: TextAlign.center, style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: AppColors.primary)),
                 const SizedBox(height: 48),
-
-                // --- Tarjeta de Estado ---
                 Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
                     color: AppColors.card,
                     borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.grey.withOpacity(0.1),
-                        spreadRadius: 2,
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
+                    boxShadow: [BoxShadow(color: Colors.grey.withOpacity(0.1), spreadRadius: 2, blurRadius: 10, offset: const Offset(0, 4))],
                   ),
                   child: Column(
                     children: [
-                      const Text(
-                        'ESTADO ACTUAL',
-                        style: TextStyle(
-                          color: AppColors.textLight,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1.5,
-                        ),
-                      ),
+                      const Text('ESTADO ACTUAL', style: TextStyle(color: AppColors.textLight, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
                       const SizedBox(height: 16),
-                      Text(
-                        _statusMessage,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          height: 1.5, // Mejora la legibilidad
-                        ),
-                      ),
+                      Text(_statusMessage, textAlign: TextAlign.center, style: const TextStyle(fontSize: 18, height: 1.5)),
                     ],
                   ),
                 ),
                 const SizedBox(height: 40),
-
-                // --- Botón de Acción ---
                 _isLoading
-                    ? const Center(
-                        child: CircularProgressIndicator(
-                          color: AppColors.primary,
-                        ),
-                      )
-                    : ElevatedButton(
-                        onPressed: _handleMarkAttendance,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primary,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                  ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            icon: const Icon(Icons.login),
+                            label: const Text('ENTRADA'),
+                            onPressed: _isLoading || _lastMarkingType == 'Entrada' ? null : () => _markAttendance('Entrada'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green,
+                              foregroundColor: Colors.white,
+                              disabledBackgroundColor: Colors.grey.shade400,
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
                           ),
-                          textStyle: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            icon: const Icon(Icons.logout),
+                            label: const Text('SALIDA'),
+                            onPressed: _isLoading || _lastMarkingType == 'Salida' ? null : () => _markAttendance('Salida'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.redAccent,
+                              foregroundColor: Colors.white,
+                              disabledBackgroundColor: Colors.grey.shade400,
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
                           ),
                         ),
-                        child: const Text('Marcar Asistencia'),
-                      ),
+                      ],
+                    ),
               ],
             ),
           ),
