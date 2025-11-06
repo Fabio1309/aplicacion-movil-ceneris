@@ -132,9 +132,22 @@ class _HomeScreenState extends State<HomeScreen> {
       List<dynamic> ubicacionesPermitidasDelTrabajador = [];
 
       if (hasInternet) {
-        final trabajadorSnap = await FirebaseFirestore.instance.collection('trabajadores').doc(widget.dni).get();
-        if (!trabajadorSnap.exists || !(trabajadorSnap.data()?['activo'] ?? false)) {
+        final querySnap = await FirebaseFirestore.instance
+            .collection('trabajadores')
+            .where('dni', isEqualTo: widget.dni) // Busca el documento donde el campo 'dni' coincida.
+            .limit(1) // Solo nos interesa el primer resultado.
+            .get();
+
+        // Verificamos si la consulta devolvió algún documento.
+        if (querySnap.docs.isEmpty) {
           if(mounted) setState(() { _statusMessage = '❌ ERROR: Trabajador no encontrado o inactivo.'; });
+          return;
+        }
+
+        // Si encontramos un documento, trabajamos con él.
+        final trabajadorDoc = querySnap.docs.first;
+        if (!(trabajadorDoc.data()['activo'] ?? false)) {
+          if(mounted) setState(() { _statusMessage = '❌ ERROR: Trabajador está inactivo.'; });
           return;
         }
 
