@@ -90,12 +90,12 @@ class _HomeScreenState extends State<HomeScreen> {
       final now = DateTime.now();
       final startOfDay = DateTime(now.year, now.month, now.day);
       final querySnapshot = await FirebaseFirestore.instance
-        .collection('asistencias')
-        .where('userDni', isEqualTo: widget.dni)
-        .where('timestamp', isGreaterThanOrEqualTo: startOfDay)
-        .orderBy('timestamp', descending: true)
-        .limit(1)
-        .get();
+          .collection('asistencias')
+          .where('userDni', isEqualTo: widget.dni)
+          .where('timestamp', isGreaterThanOrEqualTo: startOfDay)
+          .orderBy('timestamp', descending: true)
+          .limit(1)
+          .get();
 
       String newStatusMessage;
       String newLastMarkingType = 'Salida';
@@ -106,7 +106,7 @@ class _HomeScreenState extends State<HomeScreen> {
       newStatusMessage = newLastMarkingType == 'Entrada'
           ? '✅ DENTRO. Marca tu salida.'
           : 'Bienvenido. Marca tu entrada.';
-      if(mounted){
+      if (mounted) {
         setState(() {
           _lastMarkingType = newLastMarkingType;
           _statusMessage = newStatusMessage;
@@ -114,7 +114,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (e) {
       print("Error al obtener el último estado: $e");
-      if(mounted){
+      if (mounted) {
         setState(() => _statusMessage = 'Error al verificar estado.');
       }
     }
@@ -128,55 +128,83 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       final connectivityResult = await Connectivity().checkConnectivity();
-      final hasInternet = connectivityResult.contains(ConnectivityResult.mobile) || connectivityResult.contains(ConnectivityResult.wifi);
+      final hasInternet =
+          connectivityResult.contains(ConnectivityResult.mobile) ||
+              connectivityResult.contains(ConnectivityResult.wifi);
       List<dynamic> ubicacionesPermitidasDelTrabajador = [];
 
       if (hasInternet) {
         final querySnap = await FirebaseFirestore.instance
             .collection('trabajadores')
-            .where('dni', isEqualTo: widget.dni) // Busca el documento donde el campo 'dni' coincida.
+            .where('dni',
+                isEqualTo: widget
+                    .dni) // Busca el documento donde el campo 'dni' coincida.
             .limit(1) // Solo nos interesa el primer resultado.
             .get();
 
         // Verificamos si la consulta devolvió algún documento.
         if (querySnap.docs.isEmpty) {
-          if(mounted) setState(() { _statusMessage = '❌ ERROR: Trabajador no encontrado o inactivo.'; });
+          if (mounted)
+            setState(() {
+              _statusMessage = '❌ ERROR: Trabajador no encontrado o inactivo.';
+            });
           return;
         }
 
         // Si encontramos un documento, trabajamos con él.
         final trabajadorDoc = querySnap.docs.first;
         if (!(trabajadorDoc.data()['activo'] ?? false)) {
-          if(mounted) setState(() { _statusMessage = '❌ ERROR: Trabajador está inactivo.'; });
+          if (mounted)
+            setState(() {
+              _statusMessage = '❌ ERROR: Trabajador está inactivo.';
+            });
           return;
         }
 
-        final deviceDoc = await FirebaseFirestore.instance.collection('dispositivos').doc(_deviceId).get();
+        final deviceDoc = await FirebaseFirestore.instance
+            .collection('dispositivos')
+            .doc(_deviceId)
+            .get();
         if (!deviceDoc.exists) {
-            final newDeviceName = 'Dispositivo de ${widget.nombre}';
-            await FirebaseFirestore.instance.collection('dispositivos').doc(_deviceId).set({
-                'nombreDispositivo': newDeviceName,
-                'creadoEn': FieldValue.serverTimestamp(),
-                'trabajadoresPermitidos': [widget.dni]
-            });
-            print('Dispositivo nuevo registrado como "$newDeviceName" y asignado a ${widget.dni}');
+          final newDeviceName = 'Dispositivo de ${widget.nombre}';
+          await FirebaseFirestore.instance
+              .collection('dispositivos')
+              .doc(_deviceId)
+              .set({
+            'nombreDispositivo': newDeviceName,
+            'creadoEn': FieldValue.serverTimestamp(),
+            'trabajadoresPermitidos': [widget.dni]
+          });
+          print(
+              'Dispositivo nuevo registrado como "$newDeviceName" y asignado a ${widget.dni}');
         } else {
-            final trabajadoresPermitidos = deviceDoc.data()?['trabajadoresPermitidos'] as List<dynamic>? ?? [];
-            if (!trabajadoresPermitidos.contains(widget.dni)) {
-                if(mounted) setState(() { _statusMessage = '❌ ERROR: No tienes permiso para marcar en este dispositivo.'; });
-                return;
-            }
+          final trabajadoresPermitidos =
+              deviceDoc.data()?['trabajadoresPermitidos'] as List<dynamic>? ??
+                  [];
+          if (!trabajadoresPermitidos.contains(widget.dni)) {
+            if (mounted)
+              setState(() {
+                _statusMessage =
+                    '❌ ERROR: No tienes permiso para marcar en este dispositivo.';
+              });
+            return;
+          }
         }
-        
-        ubicacionesPermitidasDelTrabajador = trabajadorSnap.data()?['ubicacionesPermitidas'] ?? [];
+
+        ubicacionesPermitidasDelTrabajador =
+            trabajadorDoc.data()['ubicacionesPermitidas'] ?? [];
         if (ubicacionesPermitidasDelTrabajador.isEmpty) {
-          if(mounted) setState(() { _statusMessage = '❌ ERROR: No tiene ubicaciones asignadas.'; });
+          if (mounted)
+            setState(() {
+              _statusMessage = '❌ ERROR: No tiene ubicaciones asignadas.';
+            });
           return;
         }
       }
 
-      Position currentPosition = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-      
+      Position currentPosition = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high);
+
       bool isWithinAllowedLocation = false;
       String locationName = "Ubicación desconocida";
 
@@ -184,23 +212,27 @@ class _HomeScreenState extends State<HomeScreen> {
         isWithinAllowedLocation = true;
         locationName = "Ubicación no verificada (sin conexión)";
       } else {
-        final LatLng userLocation = LatLng(currentPosition.latitude, currentPosition.longitude);
+        final LatLng userLocation =
+            LatLng(currentPosition.latitude, currentPosition.longitude);
         final Geodesy geodesy = Geodesy();
         for (var location in _allowedLocations) {
           if (!ubicacionesPermitidasDelTrabajador.contains(location['id'])) {
             continue;
           }
-          if (location['limites'] != null && (location['limites'] as List).isNotEmpty) {
+          if (location['limites'] != null &&
+              (location['limites'] as List).isNotEmpty) {
             final List<LatLng> polygonPoints = (location['limites'] as List)
-                .map<LatLng>((p) => LatLng((p['lat'] as num).toDouble(), (p['lng'] as num).toDouble()))
+                .map<LatLng>((p) => LatLng(
+                    (p['lat'] as num).toDouble(), (p['lng'] as num).toDouble()))
                 .toList();
-            if (polygonPoints.length >= 3 && geodesy.isGeoPointInPolygon(userLocation, polygonPoints)) {
+            if (polygonPoints.length >= 3 &&
+                geodesy.isGeoPointInPolygon(userLocation, polygonPoints)) {
               isWithinAllowedLocation = true;
               locationName = location['nombre'];
               break;
             }
-          }
-          else if (location['latitud'] != null && location['longitud'] != null) {
+          } else if (location['latitud'] != null &&
+              location['longitud'] != null) {
             final double distance = Geolocator.distanceBetween(
                 (location['latitud'] as num).toDouble(),
                 (location['longitud'] as num).toDouble(),
@@ -247,7 +279,8 @@ class _HomeScreenState extends State<HomeScreen> {
       } else {
         if (mounted) {
           setState(() {
-            _statusMessage = '❌ ESTÁS FUERA DE CUALQUIER ÁREA DE TRABAJO PERMITIDA.';
+            _statusMessage =
+                '❌ ESTÁS FUERA DE CUALQUIER ÁREA DE TRABAJO PERMITIDA.';
           });
         }
       }
@@ -330,62 +363,93 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 Image.asset('assets/images/image.png', height: 80),
                 const SizedBox(height: 24),
-                const Text('Control de Asistencia', textAlign: TextAlign.center, style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: AppColors.primary)),
+                const Text('Control de Asistencia',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primary)),
                 const SizedBox(height: 48),
                 Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
                     color: AppColors.card,
                     borderRadius: BorderRadius.circular(12),
-                    boxShadow: [BoxShadow(color: Colors.grey.withOpacity(0.1), spreadRadius: 2, blurRadius: 10, offset: const Offset(0, 4))],
+                    boxShadow: [
+                      BoxShadow(
+                          color: Colors.grey.withOpacity(0.1),
+                          spreadRadius: 2,
+                          blurRadius: 10,
+                          offset: const Offset(0, 4))
+                    ],
                   ),
                   child: Column(
                     children: [
-                      const Text('ESTADO ACTUAL', style: TextStyle(color: AppColors.textLight, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+                      const Text('ESTADO ACTUAL',
+                          style: TextStyle(
+                              color: AppColors.textLight,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 1.5)),
                       const SizedBox(height: 16),
-                      Text(_statusMessage, textAlign: TextAlign.center, style: const TextStyle(fontSize: 18, height: 1.5)),
+                      Text(_statusMessage,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 18, height: 1.5)),
                     ],
                   ),
                 ),
                 const SizedBox(height: 40),
                 _isLoading
-                  ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-                  : Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            icon: const Icon(Icons.login),
-                            label: const Text('ENTRADA'),
-                            onPressed: _isLoading || _lastMarkingType == 'Entrada' ? null : () => _markAttendance('Entrada'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.green,
-                              foregroundColor: Colors.white,
-                              disabledBackgroundColor: Colors.grey.shade400,
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                              textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ? const Center(
+                        child:
+                            CircularProgressIndicator(color: AppColors.primary))
+                    : Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              icon: const Icon(Icons.login),
+                              label: const Text('ENTRADA'),
+                              onPressed:
+                                  _isLoading || _lastMarkingType == 'Entrada'
+                                      ? null
+                                      : () => _markAttendance('Entrada'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.green,
+                                foregroundColor: Colors.white,
+                                disabledBackgroundColor: Colors.grey.shade400,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12)),
+                                textStyle: const TextStyle(
+                                    fontSize: 16, fontWeight: FontWeight.bold),
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            icon: const Icon(Icons.logout),
-                            label: const Text('SALIDA'),
-                            onPressed: _isLoading || _lastMarkingType == 'Salida' ? null : () => _markAttendance('Salida'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.redAccent,
-                              foregroundColor: Colors.white,
-                              disabledBackgroundColor: Colors.grey.shade400,
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                              textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              icon: const Icon(Icons.logout),
+                              label: const Text('SALIDA'),
+                              onPressed:
+                                  _isLoading || _lastMarkingType == 'Salida'
+                                      ? null
+                                      : () => _markAttendance('Salida'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.redAccent,
+                                foregroundColor: Colors.white,
+                                disabledBackgroundColor: Colors.grey.shade400,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12)),
+                                textStyle: const TextStyle(
+                                    fontSize: 16, fontWeight: FontWeight.bold),
+                              ),
                             ),
                           ),
-                        ),
-                      ],
-                    ),
+                        ],
+                      ),
               ],
             ),
           ),

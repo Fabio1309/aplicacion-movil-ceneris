@@ -25,7 +25,9 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
-    setState(() { _isLoading = true; });
+    setState(() {
+      _isLoading = true;
+    });
     final dni = _dniController.text.trim();
 
     try {
@@ -44,19 +46,33 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
-      final trabajadorRef = FirebaseFirestore.instance.collection('trabajadores').doc(dni);
-      final trabajadorSnap = await trabajadorRef.get();
+      // Buscamos por el campo 'dni' dentro de la colección, ya que el ID
+      // del documento puede no ser el número de DNI (por ejemplo: '11').
+      final trabajadorQuery = await FirebaseFirestore.instance
+          .collection('trabajadores')
+          .where('dni', isEqualTo: dni)
+          .limit(1)
+          .get();
 
-      if (!trabajadorSnap.exists || !(trabajadorSnap.data()?['activo'] ?? false)) {
+      if (trabajadorQuery.docs.isEmpty) {
         _showError('DNI no encontrado o inactivo. Contacte al administrador.');
         return;
       }
 
-      final deviceRef = FirebaseFirestore.instance.collection('dispositivos').doc(currentDeviceId);
+      final trabajadorSnap = trabajadorQuery.docs.first;
+      if (!(trabajadorSnap.data()['activo'] ?? false)) {
+        _showError('DNI no encontrado o inactivo. Contacte al administrador.');
+        return;
+      }
+
+      final deviceRef = FirebaseFirestore.instance
+          .collection('dispositivos')
+          .doc(currentDeviceId);
       final deviceSnap = await deviceRef.get();
-      
-      final trabajadorData = trabajadorSnap.data()!;
-      final nombreDelUsuario = trabajadorData['nombre'] ?? 'Usuario Desconocido';
+
+      final trabajadorData = trabajadorSnap.data();
+      final nombreDelUsuario =
+          trabajadorData['nombre'] ?? 'Usuario Desconocido';
       final areaDelUsuario = trabajadorData['area'] ?? 'Sin Área';
 
       if (!deviceSnap.exists) {
@@ -64,11 +80,12 @@ class _LoginScreenState extends State<LoginScreen> {
         // y le damos permiso a este DNI inmediatamente.
         final newDeviceName = 'Dispositivo de $nombreDelUsuario';
         await deviceRef.set({
-            'nombreDispositivo': newDeviceName,
-            'creadoEn': FieldValue.serverTimestamp(),
-            'trabajadoresPermitidos': [dni] // ¡Se auto-asigna!
+          'nombreDispositivo': newDeviceName,
+          'creadoEn': FieldValue.serverTimestamp(),
+          'trabajadoresPermitidos': [dni] // ¡Se auto-asigna!
         });
-        print('Dispositivo nuevo registrado como "$newDeviceName" y asignado a $dni');
+        print(
+            'Dispositivo nuevo registrado como "$newDeviceName" y asignado a $dni');
         // Ahora que está registrado y asignado, procedemos directamente.
         _proceedToHomeScreen(dni, nombreDelUsuario, areaDelUsuario);
         return; // Salimos de la función aquí porque ya hemos navegado
@@ -76,20 +93,22 @@ class _LoginScreenState extends State<LoginScreen> {
 
       // Si el dispositivo ya existe, verificamos el permiso
       final data = deviceSnap.data()!;
-      final List<dynamic> trabajadoresPermitidos = data['trabajadoresPermitidos'] ?? [];
+      final List<dynamic> trabajadoresPermitidos =
+          data['trabajadoresPermitidos'] ?? [];
 
       if (trabajadoresPermitidos.contains(dni)) {
         _proceedToHomeScreen(dni, nombreDelUsuario, areaDelUsuario);
       } else {
         _showError('No tienes permiso para marcar en este dispositivo.');
       }
-      
     } catch (e) {
       _showError('Error de red al verificar. Intente de nuevo.');
       print("Error en login: $e");
     } finally {
       if (mounted) {
-        setState(() { _isLoading = false; });
+        setState(() {
+          _isLoading = false;
+        });
       }
     }
   }
@@ -103,7 +122,8 @@ class _LoginScreenState extends State<LoginScreen> {
     if (mounted) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (context) => HomeScreen(dni: dni, nombre: nombre, area: area),
+          builder: (context) =>
+              HomeScreen(dni: dni, nombre: nombre, area: area),
         ),
       );
     }
@@ -149,26 +169,26 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 40),
                   TextFormField(
-                    controller: _dniController,
-                    decoration: InputDecoration(
-                      labelText: 'DNI',
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.all(Radius.circular(12))),
-                      prefixIcon: Icon(Icons.badge_outlined),
-                      hintText: 'Ingrese su número de DNI',
-                    ),
-                    keyboardType: TextInputType.number,
-                    maxLength: 8,
-                    validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
-                        return 'El DNI es obligatorio';
-                      }
-                      if (value.length < 8) {
-                        return 'El DNI debe tener 8 dígitos';
-                      }
-                      return null;
-                    }
-                  ),
+                      controller: _dniController,
+                      decoration: InputDecoration(
+                        labelText: 'DNI',
+                        border: OutlineInputBorder(
+                            borderRadius:
+                                BorderRadius.all(Radius.circular(12))),
+                        prefixIcon: Icon(Icons.badge_outlined),
+                        hintText: 'Ingrese su número de DNI',
+                      ),
+                      keyboardType: TextInputType.number,
+                      maxLength: 8,
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'El DNI es obligatorio';
+                        }
+                        if (value.length < 8) {
+                          return 'El DNI debe tener 8 dígitos';
+                        }
+                        return null;
+                      }),
                   const SizedBox(height: 24),
                   _isLoading
                       ? const Center(
