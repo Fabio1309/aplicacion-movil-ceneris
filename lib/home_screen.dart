@@ -66,6 +66,49 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // Asegura que el servicio de ubicación esté activo y que la app tenga permisos.
+  // Devuelve true si está todo listo para obtener la posición.
+  Future<bool> _ensureLocationPermissionAndService() async {
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (mounted) {
+          setState(() => _statusMessage =
+              '❌ Servicio de ubicación desactivado. Activa la ubicación.');
+        }
+        return false;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          if (mounted) {
+            setState(() => _statusMessage =
+                '❌ Permiso de ubicación denegado. Habilítalo para marcar asistencia.');
+          }
+          return false;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        if (mounted) {
+          setState(() => _statusMessage =
+              '❌ Permiso de ubicación denegado permanentemente. Abre ajustes de la app.');
+        }
+        return false;
+      }
+
+      return true;
+    } catch (e) {
+      print('Error comprobando permisos/servicio de ubicación: $e');
+      if (mounted)
+        setState(() =>
+            _statusMessage = '❌ Error verificando permisos de ubicación.');
+      return false;
+    }
+  }
+
   Future<void> _loadAllowedLocations() async {
     try {
       final querySnapshot =
@@ -202,11 +245,58 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
 
+      final hasLocationAccess = await _ensureLocationPermissionAndService();
+      if (!hasLocationAccess) {
+        // El estado de carga se limpiará en el bloque finally; aquí solo salimos.
+        return;
+      }
+
       Position currentPosition = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.high);
 
+      // Detectar ubicación simulada (mock) y registrar como fraude si corresponde.
+      try {
+        if (currentPosition.isMocked) {
+          // Guardar en colección de asistencias fraudulentas
+          final fraudData = {
+            'deviceId': _deviceId ?? '',
+            'reason': 'Ubicación simulada detectada',
+            'reportedLatitude': currentPosition.latitude,
+            'reportedLongitude': currentPosition.longitude,
+            'timestamp': FieldValue.serverTimestamp(),
+            'userDni': widget.dni,
+            'userName': widget.nombre,
+          };
+
+          if (hasInternet) {
+            await FirebaseFirestore.instance
+                .collection('asistencias_fraudulentas')
+                .add(fraudData);
+          } else {
+            // Si no hay internet, guardamos en la cola local de asistencias pendientes
+            // indicando que pertenece a la colección de fraudulentas.
+            await Hive.box('asistencias_pendientes')
+                .add({'collection': 'asistencias_fraudulentas', ...fraudData});
+          }
+
+          if (mounted) {
+            setState(() {
+              _statusMessage =
+                  '❌ Ubicación simulada detectada. Marcación registrada como fraudulenta.';
+              _isLoading = false;
+            });
+          }
+          return;
+        }
+      } catch (e) {
+        // Algunos dispositivos/versions podrían no soportar isMocked; en ese caso continuamos.
+        print('No se pudo comprobar si la ubicación es simulada: $e');
+      }
+
       bool isWithinAllowedLocation = false;
       String locationName = "Ubicación desconocida";
+      double minDistanceToAllowed = double.infinity;
+      String nearestLocationName = '';
 
       if (!hasInternet) {
         isWithinAllowedLocation = true;
@@ -230,6 +320,19 @@ class _HomeScreenState extends State<HomeScreen> {
               isWithinAllowedLocation = true;
               locationName = location['nombre'];
               break;
+            } else {
+              // calcular distancia mínima a los vértices del polígono como aproximación
+              for (final p in polygonPoints) {
+                final double d = Geolocator.distanceBetween(
+                    p.latitude,
+                    p.longitude,
+                    currentPosition.latitude,
+                    currentPosition.longitude);
+                if (d < minDistanceToAllowed) {
+                  minDistanceToAllowed = d;
+                  nearestLocationName = (location['nombre'] ?? '').toString();
+                }
+              }
             }
           } else if (location['latitud'] != null &&
               location['longitud'] != null) {
@@ -242,6 +345,11 @@ class _HomeScreenState extends State<HomeScreen> {
               isWithinAllowedLocation = true;
               locationName = location['nombre'];
               break;
+            } else {
+              if (distance < minDistanceToAllowed) {
+                minDistanceToAllowed = distance;
+                nearestLocationName = (location['nombre'] ?? '').toString();
+              }
             }
           }
         }
@@ -279,8 +387,15 @@ class _HomeScreenState extends State<HomeScreen> {
       } else {
         if (mounted) {
           setState(() {
-            _statusMessage =
-                '❌ ESTÁS FUERA DE CUALQUIER ÁREA DE TRABAJO PERMITIDA.';
+            if (minDistanceToAllowed.isFinite &&
+                nearestLocationName.isNotEmpty) {
+              final meters = minDistanceToAllowed.round();
+              _statusMessage =
+                  '❌ ESTÁS FUERA DE CUALQUIER ÁREA DE TRABAJO PERMITIDA. Punto más cercano: $nearestLocationName — $meters m.';
+            } else {
+              _statusMessage =
+                  '❌ ESTÁS FUERA DE CUALQUIER ÁREA DE TRABAJO PERMITIDA.';
+            }
           });
         }
       }
