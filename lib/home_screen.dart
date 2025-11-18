@@ -1,18 +1,18 @@
-// lib/home_screen.dart
+// lib/home_screen.dart (VERSIÓN FINAL COMPLETAMENTE MIGRADAD A DJANGO)
 
+import 'dart:convert';
 import 'dart:io' show Platform;
-import 'dart:convert'; // CAMBIO: Necesario para manejar JSON
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http; // CAMBIO: Para hacer llamadas a la API
+import 'package:http/http.dart' as http;
 import 'package:geolocator/geolocator.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:assistenciaceneris_app/login_screen.dart'; // Ajusta la ruta si es necesario
 import 'app_colors.dart';
 import 'package:geodesy/geodesy.dart';
+import 'dart:io' show SocketException;
+import 'dart:async' show TimeoutException;
 import 'package:hive/hive.dart';
-import 'package:flutter_security_checker/flutter_security_checker.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -32,23 +32,13 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  String _statusMessage = 'Cargando...';
+  String _statusMessage = 'Cargando datos del servidor...';
   bool _isLoading = true;
   String? _deviceId;
   List<Map<String, dynamic>> _allowedLocations = [];
   String _lastMarkingType = 'Salida';
 
   final String _apiUrl = 'https://ceneris-web-oror.onrender.com/api';
-
-  void _showErrorAndLogout(String message) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message), backgroundColor: Colors.red.shade700),
-      );
-      // Llama a la función de logout que ya existe en tu código
-      _logout();
-    }
-  }
 
   @override
   void initState() {
@@ -58,7 +48,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _initializeScreen() async {
     await _getDeviceId();
-    // CAMBIO: Llamamos a la nueva función que obtiene datos del backend.
     await _fetchInitialDataFromBackend();
     if (mounted) {
       setState(() => _isLoading = false);
@@ -69,11 +58,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
     try {
       if (Platform.isAndroid) {
-        final AndroidDeviceInfo androidInfo = await deviceInfo.androidInfo;
-        _deviceId = androidInfo.id;
+        _deviceId = (await deviceInfo.androidInfo).id;
       } else if (Platform.isIOS) {
-        final IosDeviceInfo iosInfo = await deviceInfo.iosInfo;
-        _deviceId = iosInfo.identifierForVendor;
+        _deviceId = (await deviceInfo.iosInfo).identifierForVendor;
       }
     } catch (e) {
       print("Error al obtener el ID del dispositivo: $e");
@@ -92,25 +79,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       final Uri estadoUri = Uri.parse('$_apiUrl/trabajador/estado/');
-      final headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      };
-
-      // Debug: request details
-      print('[FETCH_INITIAL] GET $estadoUri');
-      print('[FETCH_INITIAL] headers=$headers');
-
-      final response = await http
-          .get(
-            estadoUri,
-            headers: headers,
-          )
-          .timeout(const Duration(seconds: 15));
-
-      // Debug: response
-      print('[FETCH_INITIAL] status=${response.statusCode}');
-      print('[FETCH_INITIAL] body=${utf8.decode(response.bodyBytes)}');
+      final response = await http.get(
+        estadoUri,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
         final data = json.decode(utf8.decode(response.bodyBytes));
@@ -140,103 +115,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Asegura que el servicio de ubicación esté activo y que la app tenga permisos.
-  // Devuelve true si está todo listo para obtener la posición.
-  Future<bool> _ensureLocationPermissionAndService() async {
-    try {
-      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        if (mounted) {
-          setState(() => _statusMessage =
-              '❌ Servicio de ubicación desactivado. Activa la ubicación.');
-        }
-        return false;
-      }
-
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          if (mounted) {
-            setState(() => _statusMessage =
-                '❌ Permiso de ubicación denegado. Habilítalo para marcar asistencia.');
-          }
-          return false;
-        }
-      }
-
-      if (permission == LocationPermission.deniedForever) {
-        if (mounted) {
-          setState(() => _statusMessage =
-              '❌ Permiso de ubicación denegado permanentemente. Abre ajustes de la app.');
-        }
-        return false;
-      }
-
-      return true;
-    } catch (e) {
-      print('Error comprobando permisos/servicio de ubicación: $e');
-      if (mounted)
-        setState(() =>
-            _statusMessage = '❌ Error verificando permisos de ubicación.');
-      return false;
-    }
-  }
-
-  Future<void> _loadAllowedLocations() async {
-    try {
-      final querySnapshot =
-          await FirebaseFirestore.instance.collection('ubicaciones').get();
-      final locations = querySnapshot.docs.map((doc) {
-        final data = doc.data();
-        data['id'] = doc.id;
-        return data;
-      }).toList();
-      if (mounted) {
-        setState(() {
-          _allowedLocations = locations;
-        });
-      }
-    } catch (e) {
-      print("Error al cargar ubicaciones: $e");
-    }
-  }
-
-  Future<void> _fetchLastMarkingState() async {
-    try {
-      final now = DateTime.now();
-      final startOfDay = DateTime(now.year, now.month, now.day);
-      final querySnapshot = await FirebaseFirestore.instance
-          .collection('asistencias')
-          .where('userDni', isEqualTo: widget.dni)
-          .where('timestamp', isGreaterThanOrEqualTo: startOfDay)
-          .orderBy('timestamp', descending: true)
-          .limit(1)
-          .get();
-
-      String newStatusMessage;
-      String newLastMarkingType = 'Salida';
-      if (querySnapshot.docs.isNotEmpty) {
-        final lastMarking = querySnapshot.docs.first.data();
-        newLastMarkingType = lastMarking['tipoMarcacion'] ?? 'Salida';
-      }
-      newStatusMessage = newLastMarkingType == 'Entrada'
-          ? '✅ DENTRO. Marca tu salida.'
-          : 'Bienvenido. Marca tu entrada.';
-      if (mounted) {
-        setState(() {
-          _lastMarkingType = newLastMarkingType;
-          _statusMessage = newStatusMessage;
-        });
-      }
-    } catch (e) {
-      print("Error al obtener el último estado: $e");
-      if (mounted) {
-        setState(() => _statusMessage = 'Error al verificar estado.');
-      }
-    }
-  }
-
   Future<void> _markAttendance(String markingType) async {
     setState(() {
       _isLoading = true;
@@ -250,128 +128,22 @@ class _HomeScreenState extends State<HomeScreen> {
               connectivityResult.contains(ConnectivityResult.wifi);
 
       final hasLocationAccess = await _ensureLocationPermissionAndService();
+      if (!hasLocationAccess) return;
 
-      if (hasInternet) {
-        final querySnap = await FirebaseFirestore.instance
-            .collection('trabajadores')
-            .where('dni',
-                isEqualTo: widget
-                    .dni) // Busca el documento donde el campo 'dni' coincida.
-            .limit(1) // Solo nos interesa el primer resultado.
-            .get();
-
-        // Verificamos si la consulta devolvió algún documento.
-        if (querySnap.docs.isEmpty) {
-          if (mounted)
-            setState(() {
-              _statusMessage = '❌ ERROR: Trabajador no encontrado o inactivo.';
-            });
-          return;
-        }
-
-        // Si encontramos un documento, trabajamos con él.
-        final trabajadorDoc = querySnap.docs.first;
-        if (!(trabajadorDoc.data()['activo'] ?? false)) {
-          if (mounted)
-            setState(() {
-              _statusMessage = '❌ ERROR: Trabajador está inactivo.';
-            });
-          return;
-        }
-
-        final deviceDoc = await FirebaseFirestore.instance
-            .collection('dispositivos')
-            .doc(_deviceId)
-            .get();
-        if (!deviceDoc.exists) {
-          final newDeviceName = 'Dispositivo de ${widget.nombre}';
-          await FirebaseFirestore.instance
-              .collection('dispositivos')
-              .doc(_deviceId)
-              .set({
-            'nombreDispositivo': newDeviceName,
-            'creadoEn': FieldValue.serverTimestamp(),
-            'trabajadoresPermitidos': [widget.dni]
-          });
-          print(
-              'Dispositivo nuevo registrado como "$newDeviceName" y asignado a ${widget.dni}');
-        } else {
-          final trabajadoresPermitidos =
-              deviceDoc.data()?['trabajadoresPermitidos'] as List<dynamic>? ??
-                  [];
-          if (!trabajadoresPermitidos.contains(widget.dni)) {
-            if (mounted)
-              setState(() {
-                _statusMessage =
-                    '❌ ERROR: No tienes permiso para marcar en este dispositivo.';
-              });
-            return;
-          }
-        }
-
-        ubicacionesPermitidasDelTrabajador =
-            trabajadorDoc.data()['ubicacionesPermitidas'] ?? [];
-        if (ubicacionesPermitidasDelTrabajador.isEmpty) {
-          if (mounted)
-            setState(() {
-              _statusMessage = '❌ ERROR: No tiene ubicaciones asignadas.';
-            });
-          return;
-        }
-      }
-
-      final hasLocationAccess = await _ensureLocationPermissionAndService();
-      if (!hasLocationAccess) {
-        // El estado de carga se limpiará en el bloque finally; aquí solo salimos.
-        return;
-      }
-
+      if (mounted) setState(() => _statusMessage = 'Obteniendo ubicación...');
       Position currentPosition = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.high);
 
-      // Detectar ubicación simulada (mock) y registrar como fraude si corresponde.
-      try {
-        if (currentPosition.isMocked) {
-          // Guardar en colección de asistencias fraudulentas
-          final fraudData = {
-            'deviceId': _deviceId ?? '',
-            'reason': 'Ubicación simulada detectada',
-            'reportedLatitude': currentPosition.latitude,
-            'reportedLongitude': currentPosition.longitude,
-            'timestamp': FieldValue.serverTimestamp(),
-            'userDni': widget.dni,
-            'userName': widget.nombre,
-          };
-
-          if (hasInternet) {
-            await FirebaseFirestore.instance
-                .collection('asistencias_fraudulentas')
-                .add(fraudData);
-          } else {
-            // Si no hay internet, guardamos en la cola local de asistencias pendientes
-            // indicando que pertenece a la colección de fraudulentas.
-            await Hive.box('asistencias_pendientes')
-                .add({'collection': 'asistencias_fraudulentas', ...fraudData});
-          }
-
-          if (mounted) {
-            setState(() {
-              _statusMessage =
-                  '❌ Ubicación simulada detectada. Marcación registrada como fraudulenta.';
-              _isLoading = false;
-            });
-          }
-          return;
-        }
-      } catch (e) {
-        // Algunos dispositivos/versions podrían no soportar isMocked; en ese caso continuamos.
-        print('No se pudo comprobar si la ubicación es simulada: $e');
+      if (currentPosition.isMocked) {
+        if (mounted)
+          setState(() => _statusMessage = '❌ Ubicación simulada detectada.');
+        return;
       }
 
+      if (mounted)
+        setState(() => _statusMessage = 'Validando área de trabajo...');
       bool isWithinAllowedLocation = false;
       String locationName = "Ubicación desconocida";
-      double minDistanceToAllowed = double.infinity;
-      String nearestLocationName = '';
 
       if (!hasInternet) {
         isWithinAllowedLocation = true;
@@ -381,9 +153,6 @@ class _HomeScreenState extends State<HomeScreen> {
             LatLng(currentPosition.latitude, currentPosition.longitude);
         final Geodesy geodesy = Geodesy();
         for (var location in _allowedLocations) {
-          if (!ubicacionesPermitidasDelTrabajador.contains(location['id'])) {
-            continue;
-          }
           if (location['limites'] != null &&
               (location['limites'] as List).isNotEmpty) {
             final List<LatLng> polygonPoints = (location['limites'] as List)
@@ -395,19 +164,6 @@ class _HomeScreenState extends State<HomeScreen> {
               isWithinAllowedLocation = true;
               locationName = location['nombre'];
               break;
-            } else {
-              // calcular distancia mínima a los vértices del polígono como aproximación
-              for (final p in polygonPoints) {
-                final double d = Geolocator.distanceBetween(
-                    p.latitude,
-                    p.longitude,
-                    currentPosition.latitude,
-                    currentPosition.longitude);
-                if (d < minDistanceToAllowed) {
-                  minDistanceToAllowed = d;
-                  nearestLocationName = (location['nombre'] ?? '').toString();
-                }
-              }
             }
           } else if (location['latitud'] != null &&
               location['longitud'] != null) {
@@ -420,37 +176,79 @@ class _HomeScreenState extends State<HomeScreen> {
               isWithinAllowedLocation = true;
               locationName = location['nombre'];
               break;
-            } else {
-              if (distance < minDistanceToAllowed) {
-                minDistanceToAllowed = distance;
-                nearestLocationName = (location['nombre'] ?? '').toString();
-              }
             }
           }
         }
       }
 
       if (isWithinAllowedLocation) {
-        final attendanceData = {
-          'tipoMarcacion': markingType,
-          'latitude': currentPosition.latitude,
-          'longitude': currentPosition.longitude,
-          'deviceId': _deviceId,
-          'userDni': widget.dni,
-          'userName': widget.nombre,
-          'userArea': widget.area,
-          'createdAt': DateTime.now().toIso8601String(),
-          'status': hasInternet ? 'success' : 'pending_sync',
-          'locationName': locationName,
+        // =================== BLOQUE CORREGIDO ===================
+        final Map<String, dynamic> attendanceData = {
+          'tipo_marcacion': markingType,
+          'latitud': currentPosition.latitude,
+          'longitud': currentPosition.longitude,
+          'device_id': _deviceId,
+          'nombre_ubicacion': locationName,
+          'timestamp':
+              DateTime.now().toIso8601String(), // Corregido el error de tipeo
         };
+        // ========================================================
+        print('[DEBUG] Enviando al backend: ${json.encode(attendanceData)}');
+
         if (hasInternet) {
-          await FirebaseFirestore.instance.collection('asistencias').add({
-            ...attendanceData,
-            'timestamp': FieldValue.serverTimestamp(),
-          });
+          await _postAttendanceToBackend(attendanceData);
         } else {
           await Hive.box('asistencias_pendientes').add(attendanceData);
+          if (mounted) {
+            setState(() {
+              _lastMarkingType = markingType;
+              _statusMessage = '✅ Marcación guardada localmente.';
+            });
+          }
         }
+      } else {
+        if (mounted)
+          setState(() => _statusMessage = '❌ Estás fuera del área de trabajo.');
+      }
+    } on SocketException {
+      // Este error es específico de problemas de red (sin internet, servidor no encontrado)
+      if (mounted)
+        setState(() =>
+            _statusMessage = '❌ Error de conexión. Verifique su internet.');
+      print("Error en _markAttendance: SocketException - Problema de red.");
+    } on TimeoutException {
+      // Este error ocurre si el servidor no responde a tiempo
+      if (mounted)
+        setState(() =>
+            _statusMessage = '❌ El servidor no responde. Intente más tarde.');
+      print(
+          "Error en _markAttendance: TimeoutException - El servidor tardó mucho en responder.");
+    } catch (e) {
+      // Este es el 'catch' general para cualquier otro error
+      if (mounted)
+        setState(() => _statusMessage = '❌ Ocurrió un error inesperado.');
+      print("Error inesperado en _markAttendance: $e");
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _postAttendanceToBackend(Map<String, dynamic> data) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('authToken');
+
+    try {
+      final response = await http.post(
+        Uri.parse('$_apiUrl/asistencias/registrar/'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: json.encode(data),
+      );
+
+      if (response.statusCode == 201) {
+        final markingType = data['tipo_marcacion'];
         if (mounted) {
           setState(() {
             _lastMarkingType = markingType;
@@ -460,34 +258,44 @@ class _HomeScreenState extends State<HomeScreen> {
           });
         }
       } else {
-        if (mounted) {
-          setState(() {
-            if (minDistanceToAllowed.isFinite &&
-                nearestLocationName.isNotEmpty) {
-              final meters = minDistanceToAllowed.round();
-              _statusMessage =
-                  '❌ ESTÁS FUERA DE CUALQUIER ÁREA DE TRABAJO PERMITIDA. Punto más cercano: $nearestLocationName — $meters m.';
-            } else {
-              _statusMessage =
-                  '❌ ESTÁS FUERA DE CUALQUIER ÁREA DE TRABAJO PERMITIDA.';
-            }
-          });
-        }
+        final errorData = json.decode(utf8.decode(response.bodyBytes));
+        final errorMessage = errorData['detail'] ??
+            errorData['error']?.toString() ??
+            'Error del servidor.';
+        if (mounted) setState(() => _statusMessage = '❌ ERROR: $errorMessage');
       }
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _statusMessage = '❌ Ocurrió un error inesperado.';
-        });
-      }
-      print("Error en _markAttendance: $e");
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
+      if (mounted)
+        setState(() => _statusMessage = '❌ Error de red al registrar.');
+      print("Error de red en post: $e");
+    }
+  }
+
+  Future<bool> _ensureLocationPermissionAndService() async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      if (mounted)
+        setState(() => _statusMessage = '❌ Servicio de ubicación desactivado.');
+      return false;
+    }
+
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        if (mounted)
+          setState(() => _statusMessage = '❌ Permiso de ubicación denegado.');
+        return false;
       }
     }
+
+    if (permission == LocationPermission.deniedForever) {
+      if (mounted)
+        setState(() => _statusMessage =
+            '❌ Permiso de ubicación denegado permanentemente.');
+      return false;
+    }
+    return true;
   }
 
   Future<void> _logout() async {
@@ -498,6 +306,15 @@ class _HomeScreenState extends State<HomeScreen> {
         MaterialPageRoute(builder: (context) => const LoginScreen()),
         (Route<dynamic> route) => false,
       );
+    }
+  }
+
+  void _showErrorAndLogout(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: Colors.red.shade700),
+      );
+      _logout();
     }
   }
 
@@ -528,6 +345,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // El widget build no necesita cambios
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(

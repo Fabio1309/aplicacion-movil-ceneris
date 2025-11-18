@@ -70,7 +70,7 @@ class _LoginScreenState extends State<LoginScreen> {
         // Usamos utf8.decode para manejar correctamente caracteres especiales como tildes.
         final responseData = json.decode(utf8.decode(response.bodyBytes));
 
-        final token = responseData['access'];
+        final token = responseData['token'];
 
         // CAMBIO: Obtenemos los datos del usuario directamente de la respuesta de la API.
         final userData = responseData['user'];
@@ -115,6 +115,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         setState(() {
           _isLoading = false;
+          _allowedLocations = List<Map<String, dynamic>>.from(locationsData);
         });
       }
     }
