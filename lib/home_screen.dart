@@ -1,7 +1,9 @@
 // lib/home_screen.dart
 
 import 'dart:io' show Platform;
+import 'dart:convert'; // CAMBIO: Necesario para manejar JSON
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http; // CAMBIO: Para hacer llamadas a la API
 import 'package:geolocator/geolocator.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:device_info_plus/device_info_plus.dart';
@@ -36,6 +38,18 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Map<String, dynamic>> _allowedLocations = [];
   String _lastMarkingType = 'Salida';
 
+  final String _apiUrl = 'https://ceneris-web-oror.onrender.com/api';
+
+  void _showErrorAndLogout(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: Colors.red.shade700),
+      );
+      // Llama a la función de logout que ya existe en tu código
+      _logout();
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -44,8 +58,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _initializeScreen() async {
     await _getDeviceId();
-    await _loadAllowedLocations();
-    await _fetchLastMarkingState();
+    // CAMBIO: Llamamos a la nueva función que obtiene datos del backend.
+    await _fetchInitialDataFromBackend();
     if (mounted) {
       setState(() => _isLoading = false);
     }
@@ -63,6 +77,66 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (e) {
       print("Error al obtener el ID del dispositivo: $e");
+    }
+  }
+
+  Future<void> _fetchInitialDataFromBackend() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('authToken');
+
+    if (token == null) {
+      _showErrorAndLogout(
+          'Sesión inválida. Por favor, inicie sesión de nuevo.');
+      return;
+    }
+
+    try {
+      final Uri estadoUri = Uri.parse('$_apiUrl/trabajador/estado/');
+      final headers = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      };
+
+      // Debug: request details
+      print('[FETCH_INITIAL] GET $estadoUri');
+      print('[FETCH_INITIAL] headers=$headers');
+
+      final response = await http
+          .get(
+            estadoUri,
+            headers: headers,
+          )
+          .timeout(const Duration(seconds: 15));
+
+      // Debug: response
+      print('[FETCH_INITIAL] status=${response.statusCode}');
+      print('[FETCH_INITIAL] body=${utf8.decode(response.bodyBytes)}');
+
+      if (response.statusCode == 200) {
+        final data = json.decode(utf8.decode(response.bodyBytes));
+        final newLastMarkingType = data['ultimoTipoMarcacion'] ?? 'Salida';
+        final locationsData = data['ubicacionesPermitidas'] as List;
+
+        final newStatusMessage = newLastMarkingType == 'Entrada'
+            ? '✅ DENTRO. Marca tu salida.'
+            : 'Bienvenido. Marca tu entrada.';
+
+        if (mounted) {
+          setState(() {
+            _lastMarkingType = newLastMarkingType;
+            _statusMessage = newStatusMessage;
+            _allowedLocations = List<Map<String, dynamic>>.from(locationsData);
+          });
+        }
+      } else {
+        if (mounted)
+          setState(
+              () => _statusMessage = 'Error al cargar datos del servidor.');
+      }
+    } catch (e) {
+      print("Error de red al obtener datos iniciales: $e");
+      if (mounted)
+        setState(() => _statusMessage = 'Error de red. Intente más tarde.');
     }
   }
 
@@ -174,7 +248,8 @@ class _HomeScreenState extends State<HomeScreen> {
       final hasInternet =
           connectivityResult.contains(ConnectivityResult.mobile) ||
               connectivityResult.contains(ConnectivityResult.wifi);
-      List<dynamic> ubicacionesPermitidasDelTrabajador = [];
+
+      final hasLocationAccess = await _ensureLocationPermissionAndService();
 
       if (hasInternet) {
         final querySnap = await FirebaseFirestore.instance
