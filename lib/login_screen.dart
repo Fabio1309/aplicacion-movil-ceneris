@@ -2,6 +2,7 @@
 
 import 'dart:convert';
 import 'dart:io' show Platform;
+import 'package:uuid/uuid.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -27,24 +28,45 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
-    _getDeviceId();
+    _initializeDeviceId();
   }
 
-  Future<void> _getDeviceId() async {
-    final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
+  Future<void> _initializeDeviceId() async {
     try {
-      if (Platform.isAndroid) {
-        _deviceId = (await deviceInfo.androidInfo).id;
-      } else if (Platform.isIOS) {
-        _deviceId = (await deviceInfo.iosInfo).identifierForVendor;
-      }
-      print("[DEVICE INFO] ID obtenido: $_deviceId");
+      _deviceId = await getUniqueDeviceId();
     } catch (e) {
-      print("Error al obtener el ID del dispositivo: $e");
-      if (mounted)
-        _showError(
-            "No se pudo obtener el ID del dispositivo. La app no puede continuar.");
+      print("Error al obtener el ID único del dispositivo: $e");
+      if (mounted) _showError("No se pudo generar un ID para el dispositivo.");
     }
+  }
+
+  Future<String> getUniqueDeviceId() async {
+    final prefs = await SharedPreferences.getInstance();
+    String? deviceId = prefs.getString('unique_device_id');
+    if (deviceId == null) {
+      // Intentar obtener un identificador estable del sistema
+      try {
+        final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
+        if (Platform.isAndroid) {
+          final info = await deviceInfo.androidInfo;
+          // id del dispositivo proporcionado por AndroidDeviceInfo
+          deviceId = info.id;
+        } else if (Platform.isIOS) {
+          final info = await deviceInfo.iosInfo;
+          deviceId = info.identifierForVendor;
+        }
+      } catch (e) {
+        print('[DEVICE INFO] error leyendo device info: $e');
+      }
+
+      // Si no obtenemos un id del sistema, generamos un UUID como fallback
+      deviceId ??= const Uuid().v4();
+      await prefs.setString('unique_device_id', deviceId);
+      print('[DEVICE INFO] device id determinado y guardado: $deviceId');
+    } else {
+      print('[DEVICE INFO] UUID existente recuperado: $deviceId');
+    }
+    return deviceId;
   }
 
   Future<void> _login() async {
