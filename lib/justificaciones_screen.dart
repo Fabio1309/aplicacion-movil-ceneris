@@ -42,7 +42,8 @@ class _ListaFaltasScreenState extends State<ListaFaltasScreen> {
           Navigator.pop(context);
           _cargarFaltas(); // Recargar lista al terminar
           ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text("Justificación enviada correctamente")));
+             SnackBar(content: Text("Justificación enviada correctamente"))
+          );
         },
       ),
     );
@@ -51,8 +52,7 @@ class _ListaFaltasScreenState extends State<ListaFaltasScreen> {
   @override
   Widget build(BuildContext context) {
     if (_loading) return Center(child: CircularProgressIndicator());
-    if (_faltas.isEmpty)
-      return Center(child: Text("No tienes faltas pendientes de justificar."));
+    if (_faltas.isEmpty) return Center(child: Text("No tienes faltas pendientes de justificar."));
 
     return ListView.builder(
       itemCount: _faltas.length,
@@ -80,19 +80,17 @@ class FormularioJustificacion extends StatefulWidget {
   final String fechaStr;
   final VoidCallback onSuccess;
 
-  const FormularioJustificacion(
-      {required this.tareoId, required this.fechaStr, required this.onSuccess});
+  const FormularioJustificacion({required this.tareoId, required this.fechaStr, required this.onSuccess});
 
   @override
-  _FormularioJustificacionState createState() =>
-      _FormularioJustificacionState();
+  _FormularioJustificacionState createState() => _FormularioJustificacionState();
 }
 
 class _FormularioJustificacionState extends State<FormularioJustificacion> {
   final _formKey = GlobalKey<FormState>();
   final _descController = TextEditingController();
   final ApiService _api = ApiService();
-
+  
   String _motivoSeleccionado = 'SALUD';
   File? _archivoSeleccionado;
   bool _enviando = false;
@@ -120,9 +118,9 @@ class _FormularioJustificacionState extends State<FormularioJustificacion> {
 
   Future<void> _enviar() async {
     if (!_formKey.currentState!.validate()) return;
-
+    
     setState(() => _enviando = true);
-
+    
     final exito = await _api.enviarJustificacion(
       tareoId: widget.tareoId,
       motivo: _motivoSeleccionado,
@@ -131,12 +129,11 @@ class _FormularioJustificacionState extends State<FormularioJustificacion> {
     );
 
     setState(() => _enviando = false);
-
+    
     if (exito) {
       widget.onSuccess();
     } else {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text("Error al enviar")));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error al enviar")));
     }
   }
 
@@ -144,29 +141,25 @@ class _FormularioJustificacionState extends State<FormularioJustificacion> {
   Widget build(BuildContext context) {
     return Padding(
       padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom,
-          left: 20,
-          right: 20,
-          top: 20),
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+        left: 20, right: 20, top: 20
+      ),
       child: Form(
         key: _formKey,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text("Justificar ${widget.fechaStr}",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text("Justificar ${widget.fechaStr}", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             SizedBox(height: 15),
+            
             DropdownButtonFormField(
               value: _motivoSeleccionado,
-              items: _opciones
-                  .map((o) => DropdownMenuItem(
-                      value: o['val'], child: Text(o['label']!)))
-                  .toList(),
-              onChanged: (v) =>
-                  setState(() => _motivoSeleccionado = v.toString()),
+              items: _opciones.map((o) => DropdownMenuItem(value: o['val'], child: Text(o['label']!))).toList(),
+              onChanged: (v) => setState(() => _motivoSeleccionado = v.toString()),
               decoration: InputDecoration(labelText: "Motivo"),
             ),
+            
             TextFormField(
               controller: _descController,
               decoration: InputDecoration(labelText: "Descripción detallada"),
@@ -174,6 +167,7 @@ class _FormularioJustificacionState extends State<FormularioJustificacion> {
               validator: (v) => v!.isEmpty ? "Requerido" : null,
             ),
             SizedBox(height: 10),
+            
             Row(
               children: [
                 ElevatedButton.icon(
@@ -182,25 +176,17 @@ class _FormularioJustificacionState extends State<FormularioJustificacion> {
                   label: Text("Adjuntar Evidencia"),
                 ),
                 SizedBox(width: 10),
-                Expanded(
-                    child: Text(
-                        _archivoSeleccionado != null
-                            ? "Archivo seleccionado"
-                            : "Sin archivo",
-                        overflow: TextOverflow.ellipsis))
+                Expanded(child: Text(_archivoSeleccionado != null ? "Archivo seleccionado" : "Sin archivo", overflow: TextOverflow.ellipsis))
               ],
             ),
             SizedBox(height: 20),
+            
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _enviando ? null : _enviar,
-                child: _enviando
-                    ? CircularProgressIndicator(color: Colors.white)
-                    : Text("ENVIAR JUSTIFICACIÓN"),
-                style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
-                    foregroundColor: Colors.white),
+                child: _enviando ? CircularProgressIndicator(color: Colors.white) : Text("ENVIAR JUSTIFICACIÓN"),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
               ),
             ),
             SizedBox(height: 20),

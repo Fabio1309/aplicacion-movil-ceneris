@@ -7,7 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:geolocator/geolocator.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:assistenciaceneris_app/login_screen.dart'; // Ajusta la ruta si es necesario
+import 'package:ceneris/login_screen.dart'; // Ajusta la ruta si es necesario
 import 'app_colors.dart';
 import 'package:geodesy/geodesy.dart';
 import 'dart:io' show SocketException;

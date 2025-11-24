@@ -7,7 +7,7 @@
     
     
     <application
-        android:label="AssistCeneris"
+        android:label="ceneris"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon"
         android:usesCleartextTraffic="true">

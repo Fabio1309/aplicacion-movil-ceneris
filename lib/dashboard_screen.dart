@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'login_screen.dart';
 import 'home_screen.dart'; // Tu pantalla de asistencia
 import 'solicitud_horas_extra_screen.dart'; // La pantalla que creamos
+import 'justificaciones_screen.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
@@ -89,8 +90,12 @@ class DashboardScreen extends StatelessWidget {
               icon: Icons.edit_calendar_outlined,
               title: 'Justificar Ausencia',
               onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Funcionalidad en desarrollo.')),
+                // Ahora redirige a la pantalla real de justificaciones
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                      builder: (context) =>
+                          ListaFaltasScreen() // <--- CAMBIO AQUÍ
+                      ),
                 );
               },
             ),
