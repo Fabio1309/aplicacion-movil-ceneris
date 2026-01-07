@@ -89,6 +89,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (response.statusCode == 200) {
         final data = json.decode(utf8.decode(response.bodyBytes));
+
+        // --- CAMBIO 1: GUARDAR CACHÉ LOCAL ---
+        await prefs.setString('cached_config', json.encode(data));
+          _applyBackendData(data); // Función auxiliar para limpiar código
+      } else {
+        _loadCachedConfig(prefs); // Si el servidor falla, intenta cargar caché
+      }
+
         final newLastMarkingType = data['ultimoTipoMarcacion'] ?? 'Salida';
         final locationsData = data['ubicacionesPermitidas'] as List;
 
