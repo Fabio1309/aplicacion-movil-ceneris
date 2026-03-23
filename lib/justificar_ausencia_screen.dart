@@ -14,14 +14,12 @@ class JustificarAusenciaScreen extends StatefulWidget {
 }
 
 class _JustificarAusenciaScreenState extends State<JustificarAusenciaScreen> {
-  // --- VARIABLES DE ESTADO ---
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
-  Map<String, dynamic> _dataPorFecha = {}; // Cache de datos
+  Map<String, dynamic> _dataPorFecha = {};
   bool _isLoading = true;
   final String _baseUrl = 'https://ceneris-web-oror.onrender.com/api';
 
-  // --- VARIABLES FORMULARIO ---
   final _formKey = GlobalKey<FormState>();
   final _descripcionController = TextEditingController();
   String? _motivoSeleccionado;
@@ -42,11 +40,18 @@ class _JustificarAusenciaScreenState extends State<JustificarAusenciaScreen> {
     _cargarHistorial();
   }
 
-  // 1. CARGA DE DATOS DESDE DJANGO
+  // --- HELPER PARA COMPARAR FECHAS SIN HORA ---
+  bool _esFuturo(DateTime dia) {
+    final now = DateTime.now();
+    final hoySinHora = DateTime(now.year, now.month, now.day);
+    final diaSinHora = DateTime(dia.year, dia.month, dia.day);
+    return diaSinHora.isAfter(hoySinHora);
+  }
+  // --------------------------------------------
+
   Future<void> _cargarHistorial() async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('authToken');
-
     final mes = _focusedDay.month;
     final anio = _focusedDay.year;
 
@@ -60,27 +65,22 @@ class _JustificarAusenciaScreenState extends State<JustificarAusenciaScreen> {
         final List<dynamic> lista =
             json.decode(utf8.decode(response.bodyBytes));
         final Map<String, dynamic> mapaTemp = {};
-
         for (var item in lista) {
           mapaTemp[item['fecha']] = item;
         }
-
-        if (mounted) {
+        if (mounted)
           setState(() {
             _dataPorFecha = mapaTemp;
             _isLoading = false;
           });
-        }
       } else {
         if (mounted) setState(() => _isLoading = false);
       }
     } catch (e) {
-      print("Error cargando historial: $e");
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // 2. ENVIAR JUSTIFICACIÓN A DJANGO
   Future<void> _enviarJustificacion(Function setStateDialog) async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -89,19 +89,38 @@ class _JustificarAusenciaScreenState extends State<JustificarAusenciaScreen> {
     final token = prefs.getString('authToken');
 
     try {
-      final body = {
+      final bodyMap = {
         "fecha": DateFormat('yyyy-MM-dd').format(_selectedDay!),
         "motivo": _motivoSeleccionado,
         "descripcion": _descripcionController.text
       };
 
-      final response = await http.post(
-          Uri.parse('$_baseUrl/justificaciones/crear/'),
+      final String bodyJson = json.encode(bodyMap);
+
+      // --- 🔍 INICIO DEPURACIÓN ---
+      final Uri urlCompleta = Uri.parse('$_baseUrl/justificaciones/crear/');
+
+      print("\n🔵 ================= SOLICITUD HTTP =================");
+      print("📡 URL DESTINO: $urlCompleta");
+      print(
+          "🔑 TOKEN: Bearer ${token?.substring(0, 10)}..."); // Solo mostramos el inicio por seguridad
+      print("📦 BODY (DATOS): $bodyJson");
+      print("===================================================\n");
+      // -----------------------------
+
+      final response = await http.post(urlCompleta,
           headers: {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer $token'
           },
-          body: json.encode(body));
+          body: bodyJson);
+
+      // --- 🔍 RESPUESTA DEPURACIÓN ---
+      print("\n🟠 ================= RESPUESTA SERVIDOR =================");
+      print("STATUS CODE: ${response.statusCode}");
+      print("CUERPO RESPUESTA: ${response.body}");
+      print("=====================================================\n");
+      // ------------------------------
 
       if (response.statusCode == 201 || response.statusCode == 200) {
         if (mounted) {
@@ -109,12 +128,14 @@ class _JustificarAusenciaScreenState extends State<JustificarAusenciaScreen> {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
               content: Text('Justificación enviada correctamente'),
               backgroundColor: Colors.green));
-          _cargarHistorial(); // Recargar para ver el cambio de estado
+          _cargarHistorial();
         }
       } else {
-        throw Exception("Error al guardar: ${response.statusCode}");
+        // Si falla, lanzamos error para que caiga en el catch y muestre el snackbar
+        throw Exception("Error ${response.statusCode}: ${response.body}");
       }
     } catch (e) {
+      print("❌ ERROR EXCEPCIÓN: $e");
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text("Error: $e")));
     } finally {
@@ -122,7 +143,6 @@ class _JustificarAusenciaScreenState extends State<JustificarAusenciaScreen> {
     }
   }
 
-  // --- UI PRINCIPAL ---
   @override
   Widget build(BuildContext context) {
     final fechaKey = _selectedDay != null
@@ -153,7 +173,6 @@ class _JustificarAusenciaScreenState extends State<JustificarAusenciaScreen> {
     );
   }
 
-  // WIDGET CALENDARIO
   Widget _buildCalendario() {
     return TableCalendar(
       locale: 'es_ES',
@@ -166,9 +185,7 @@ class _JustificarAusenciaScreenState extends State<JustificarAusenciaScreen> {
           _selectedDay = selectedDay;
           _focusedDay = focusedDay;
         });
-        // Recargar si cambia de mes
         if (_focusedDay.month != focusedDay.month) {
-          // Pequeña optimización para recargar datos
           Future.delayed(Duration.zero, () => _cargarHistorial());
         }
       },
@@ -186,8 +203,19 @@ class _JustificarAusenciaScreenState extends State<JustificarAusenciaScreen> {
         singleMarkerBuilder: (context, date, event) {
           final data = event as Map<String, dynamic>;
           Color color = Colors.grey;
-          if (data['resultado'] == 'A') color = Colors.green;
-          if (data['resultado'] == 'F') color = Colors.red;
+
+          // --- CAMBIO 1: VALIDAR FUTURO VISUALMENTE ---
+          bool esFuturo = _esFuturo(date);
+
+          if (esFuturo) {
+            // Si es futuro, aunque la BD diga 'F', lo pintamos gris/azul (Programado)
+            color = Colors.blueGrey.withOpacity(0.5);
+          } else {
+            // Si es hoy o pasado, respetamos el color real
+            if (data['resultado'] == 'A') color = Colors.green;
+            if (data['resultado'] == 'F') color = Colors.red;
+          }
+          // ---------------------------------------------
 
           return Container(
             decoration: BoxDecoration(shape: BoxShape.circle, color: color),
@@ -200,17 +228,60 @@ class _JustificarAusenciaScreenState extends State<JustificarAusenciaScreen> {
     );
   }
 
-  // PANEL DINÁMICO
   Widget _buildPanelDetalle(Map<String, dynamic> data) {
     bool esFalta = data['resultado'] == 'F';
     bool esAsistencia = data['resultado'] == 'A';
     String? estadoJustificacion = data['justificacion_estado'];
-
-    // --- AQUÍ ESTÁ LA CORRECCIÓN CLAVE ---
-    // Parseamos de forma segura: String -> double. Si es null o falla, es 0.0
     double tardanza = double.tryParse(data['tardanza_horas'].toString()) ?? 0.0;
-    // -------------------------------------
 
+    // --- CAMBIO 2: DETECTAR SI ES FUTURO PARA EL PANEL ---
+    // Usamos _selectedDay que es el día que el usuario tocó
+    bool esFuturo = _esFuturo(_selectedDay!);
+    // -----------------------------------------------------
+
+    // Si es futuro, forzamos que NO se vea como Falta, sino como Programado
+    if (esFuturo) {
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.calendar_month_outlined, size: 60, color: Colors.blueGrey),
+          const SizedBox(height: 15),
+          Text(
+            "TURNO PROGRAMADO",
+            style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.blueGrey),
+          ),
+          const SizedBox(height: 8),
+          Text(DateFormat.yMMMMEEEEd('es_ES').format(_selectedDay!),
+              style: const TextStyle(color: Colors.grey)),
+          const SizedBox(height: 20),
+          Container(
+            padding: EdgeInsets.all(15),
+            decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.grey.shade300)),
+            child: Column(
+              children: [
+                _buildTimeRow("Entrada", data['entrada_prog'] ?? '--:--',
+                    Icons.wb_sunny_outlined),
+                Divider(),
+                _buildTimeRow("Salida", data['salida_prog'] ?? '--:--',
+                    Icons.nights_stay_outlined),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text("Este día aún no ha transcurrido.",
+              style:
+                  TextStyle(fontStyle: FontStyle.italic, color: Colors.grey)),
+        ],
+      );
+    }
+
+    // --- EL RESTO DE LA LÓGICA (PASADO Y HOY) SE MANTIENE IGUAL ---
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -248,10 +319,7 @@ class _JustificarAusenciaScreenState extends State<JustificarAusenciaScreen> {
               ),
             ),
           ),
-
           const SizedBox(height: 20),
-
-          // ESCENARIO A: ASISTENCIA
           if (esAsistencia) ...[
             const Text("Resumen de Jornada",
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
@@ -287,14 +355,11 @@ class _JustificarAusenciaScreenState extends State<JustificarAusenciaScreen> {
                 ),
               )
           ],
-
-          // ESCENARIO B: FALTA
           if (esFalta) ...[
             const Text("Detalle",
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             const SizedBox(height: 10),
-            const Text(
-                "No se registraron marcaciones válidas para este día asignado."),
+            const Text("No se registraron marcaciones válidas para este día."),
             const SizedBox(height: 30),
             if (estadoJustificacion == null)
               SizedBox(
@@ -357,13 +422,12 @@ class _JustificarAusenciaScreenState extends State<JustificarAusenciaScreen> {
 
   Widget _buildEmptyState() {
     return const Center(
-        child: Text("Sin información para este día (Día Libre o Futuro)"));
+        child: Text("Sin información para este día (Día Libre)"));
   }
 
   void _abrirModalJustificacion() {
     _motivoSeleccionado = null;
     _descripcionController.clear();
-
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -408,9 +472,8 @@ class _JustificarAusenciaScreenState extends State<JustificarAusenciaScreen> {
               ),
               actions: [
                 TextButton(
-                  onPressed: _enviando ? null : () => Navigator.pop(context),
-                  child: const Text("Cancelar"),
-                ),
+                    onPressed: _enviando ? null : () => Navigator.pop(context),
+                    child: const Text("Cancelar")),
                 ElevatedButton(
                   onPressed: _enviando
                       ? null

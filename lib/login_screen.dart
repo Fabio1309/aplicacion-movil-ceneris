@@ -1,4 +1,4 @@
-// lib/login_screen.dart (VERSIÓN FINAL CON VALIDACIÓN DE DISPOSITIVO EN EL LOGIN)
+// lib/login_screen.dart (DISEÑO MEJORADO)
 
 import 'dart:convert';
 import 'dart:io' show Platform;
@@ -21,7 +21,9 @@ class _LoginScreenState extends State<LoginScreen> {
   final _dniController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
-  String? _deviceId; // CORRECCIÓN: Se declara la variable para guardar el ID
+  String? _deviceId;
+  bool _isObscure =
+      true; // Para ocultar/mostrar contraseña si quisieras usarla a futuro
 
   final String _apiUrl = 'https://ceneris-web-oror.onrender.com/api';
 
@@ -31,6 +33,7 @@ class _LoginScreenState extends State<LoginScreen> {
     _initializeDeviceId();
   }
 
+  // --- LOGICA DE DISPOSITIVO (INTACTA) ---
   Future<void> _initializeDeviceId() async {
     try {
       _deviceId = await getUniqueDeviceId();
@@ -44,12 +47,10 @@ class _LoginScreenState extends State<LoginScreen> {
     final prefs = await SharedPreferences.getInstance();
     String? deviceId = prefs.getString('unique_device_id');
     if (deviceId == null) {
-      // Intentar obtener un identificador estable del sistema
       try {
         final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
         if (Platform.isAndroid) {
           final info = await deviceInfo.androidInfo;
-          // id del dispositivo proporcionado por AndroidDeviceInfo
           deviceId = info.id;
         } else if (Platform.isIOS) {
           final info = await deviceInfo.iosInfo;
@@ -58,37 +59,28 @@ class _LoginScreenState extends State<LoginScreen> {
       } catch (e) {
         print('[DEVICE INFO] error leyendo device info: $e');
       }
-
-      // Si no obtenemos un id del sistema, generamos un UUID como fallback
       deviceId ??= const Uuid().v4();
       await prefs.setString('unique_device_id', deviceId);
-      print('[DEVICE INFO] device id determinado y guardado: $deviceId');
-    } else {
-      print('[DEVICE INFO] UUID existente recuperado: $deviceId');
     }
     return deviceId;
   }
 
+  // --- LOGICA DE LOGIN (INTACTA CON MEJORA DE ERROR) ---
   Future<void> _login() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
-
+    if (!_formKey.currentState!.validate()) return;
     if (_deviceId == null) {
       _showError("El ID del dispositivo no está disponible. Reinicie la app.");
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
 
     final dni = _dniController.text.trim();
+    // Asumimos que la contraseña es el mismo DNI por defecto
     final password = dni;
 
     try {
       final Uri loginUri = Uri.parse('$_apiUrl/token/');
-
       final requestBody = json.encode({
         'username': dni,
         'password': password,
@@ -97,7 +89,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
       print("[LOGIN] Enviando: $requestBody");
 
-      // CORRECCIÓN: Se eliminó la llamada a http.post duplicada.
       final response = await http
           .post(
             loginUri,
@@ -127,30 +118,31 @@ class _LoginScreenState extends State<LoginScreen> {
 
         _proceedToDashboard();
       } else {
-        final errorData = json.decode(utf8.decode(response.bodyBytes));
-        final errorMessage = errorData['detail'] ??
-            errorData['non_field_errors']?[0] ??
-            'Credenciales o permisos incorrectos.';
-        _showError(errorMessage);
+        print("❌ Error del servidor: ${response.statusCode}");
+        print("❌ Cuerpo de respuesta: ${response.body}");
+
+        try {
+          final errorData = json.decode(utf8.decode(response.bodyBytes));
+          final errorMessage = errorData['detail'] ??
+              errorData['non_field_errors']?[0] ??
+              'Credenciales incorrectas.';
+          _showError(errorMessage);
+        } catch (e) {
+          _showError('Error del servidor (${response.statusCode}).');
+        }
       }
     } catch (e) {
-      _showError('Error de red al conectar con el servidor.');
+      _showError('Error de conexión. Verifique su internet.');
       print("Error en login: $e");
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   void _proceedToDashboard() {
     if (mounted) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (context) => const DashboardScreen(),
-        ),
+        MaterialPageRoute(builder: (context) => const DashboardScreen()),
       );
     }
   }
@@ -158,83 +150,228 @@ class _LoginScreenState extends State<LoginScreen> {
   void _showError(String message) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message), backgroundColor: Colors.red.shade700),
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.error_outline, color: Colors.white),
+              const SizedBox(width: 10),
+              Expanded(child: Text(message)),
+            ],
+          ),
+          backgroundColor: Colors.red.shade700,
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
       );
     }
   }
 
+  // --- NUEVO DISEÑO VISUAL ---
   @override
   Widget build(BuildContext context) {
-    // El widget build no necesita cambios
+    // Obtenemos el tamaño de la pantalla
+    final size = MediaQuery.of(context).size;
+
     return Scaffold(
-      backgroundColor: AppColors.background,
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24.0),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                // ... (El contenido de la columna se mantiene igual) ...
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Image.asset('assets/images/image.png', height: 80),
-                  const SizedBox(height: 24),
-                  const Text('Identificación de Empleado',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
+      backgroundColor: Colors.white, // Fondo base
+      body: SingleChildScrollView(
+        child: SizedBox(
+          height: size.height,
+          child: Stack(
+            children: [
+              // 1. Fondo Superior con Degradado Curvo
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                height: size.height * 0.45,
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        AppColors.primary,
+                        AppColors.primary.withOpacity(0.7),
+                      ],
+                    ),
+                    borderRadius: const BorderRadius.only(
+                      bottomLeft: Radius.circular(40),
+                      bottomRight: Radius.circular(40),
+                    ),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // AQUÍ CAMBIAS LA IMAGEN
+                      // Asegúrate de que la ruta 'assets/images/logo_login.png' exista
+                      // Si no tienes imagen aún, usa un Icono grande temporalmente:
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                        ),
+                        // Cambia esto por Image.asset('assets/images/logo_login.png', height: 100)
+                        child: Image.asset(
+                          'assets/images/image.png',
+                          height: 100,
+                        ),
+                      ),
+                      const SizedBox(height: 15),
+                      const Text(
+                        'CENERIS',
+                        style: TextStyle(
+                          color: Colors.white,
                           fontSize: 28,
                           fontWeight: FontWeight.bold,
-                          color: AppColors.primary)),
-                  const SizedBox(height: 16),
-                  const Text('Por favor, ingrese su DNI para continuar.',
-                      textAlign: TextAlign.center,
-                      style:
-                          TextStyle(fontSize: 16, color: AppColors.textLight)),
-                  const SizedBox(height: 40),
-                  TextFormField(
-                    controller: _dniController,
-                    decoration: const InputDecoration(
-                      labelText: 'DNI',
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.all(Radius.circular(12))),
-                      prefixIcon: Icon(Icons.badge_outlined),
-                      hintText: 'Ingrese su número de DNI',
-                    ),
-                    keyboardType: TextInputType.number,
-                    maxLength: 8,
-                    validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
-                        return 'El DNI es obligatorio';
-                      }
-                      if (value.length < 8) {
-                        return 'El DNI debe tener 8 dígitos';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 24),
-                  _isLoading
-                      ? const Center(
-                          child: CircularProgressIndicator(
-                              color: AppColors.primary))
-                      : ElevatedButton(
-                          onPressed: _login,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.primary,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12)),
-                            textStyle: const TextStyle(
-                                fontSize: 18, fontWeight: FontWeight.bold),
-                          ),
-                          child: const Text('Verificar y Continuar'),
+                          letterSpacing: 2,
                         ),
-                ],
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            ),
+
+              // 2. Tarjeta del Formulario (Flotante)
+              Positioned(
+                top: size.height * 0.38, // Ajusta para que solape el fondo
+                left: 20,
+                right: 20,
+                child: Card(
+                  elevation: 8,
+                  shadowColor: Colors.black26,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 32),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const Text(
+                            'Bienvenido',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.text,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Ingrese sus credenciales para acceder',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.grey,
+                              fontSize: 14,
+                            ),
+                          ),
+                          const SizedBox(height: 30),
+
+                          // Input DNI Estilizado
+                          TextFormField(
+                            controller: _dniController,
+                            keyboardType: TextInputType.number,
+                            maxLength: 8,
+                            style: const TextStyle(fontWeight: FontWeight.w500),
+                            decoration: InputDecoration(
+                              labelText: 'DNI / Usuario',
+                              prefixIcon: const Icon(Icons.person_outline,
+                                  color: AppColors.primary),
+                              filled: true,
+                              fillColor: Colors.grey.shade50,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide.none,
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide:
+                                    BorderSide(color: Colors.grey.shade200),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: const BorderSide(
+                                    color: AppColors.primary, width: 1.5),
+                              ),
+                              counterText: "", // Oculta el contador pequeño
+                            ),
+                            validator: (value) {
+                              if (value == null || value.trim().isEmpty)
+                                return 'Ingrese su DNI';
+                              if (value.length < 8)
+                                return 'DNI inválido (mín. 8 dígitos)';
+                              return null;
+                            },
+                          ),
+
+                          const SizedBox(height: 30),
+
+                          // Botón de Login
+                          _isLoading
+                              ? const Center(
+                                  child: CircularProgressIndicator(
+                                      color: AppColors.primary))
+                              : Container(
+                                  height: 55,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(12),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color:
+                                            AppColors.primary.withOpacity(0.3),
+                                        blurRadius: 10,
+                                        offset: const Offset(0, 5),
+                                      ),
+                                    ],
+                                  ),
+                                  child: ElevatedButton(
+                                    onPressed: _login,
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: AppColors.primary,
+                                      foregroundColor: Colors.white,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      elevation:
+                                          0, // Quitamos elevación predeterminada para usar la sombra custom
+                                    ),
+                                    child: const Text(
+                                      'INICIAR SESIÓN',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 1,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              // 3. Texto inferior (Footer)
+              Positioned(
+                bottom: 20,
+                left: 0,
+                right: 0,
+                child: Text(
+                  'Versión 1.0.0',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.grey.shade400,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
