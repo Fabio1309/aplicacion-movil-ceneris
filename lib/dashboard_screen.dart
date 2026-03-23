@@ -9,6 +9,7 @@ import 'login_screen.dart';
 import 'home_screen.dart';
 import 'solicitud_horas_extra_screen.dart';
 import 'justificar_ausencia_screen.dart';
+import 'historial_marcaciones_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -184,7 +185,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       },
                     ),
 
-                    // Opción 4: Más Opciones (Perfil, Config, etc.)
+                    // Opción 4: Historial de Marcaciones
+                    DashboardCard(
+                      icon: Icons.history_edu_rounded, // Icono de historial
+                      title: 'Historial\nMarcaciones',
+                      colorTheme: Colors.indigoAccent,
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (context) =>
+                                  HistorialMarcacionesScreen()),
+                        );
+                      },
+                    ),
+
+                    // Opción 5: Más Opciones (Perfil, Config, etc.)
                     DashboardCard(
                       icon: Icons.tune_rounded,
                       title: 'Más\nOpciones',
