@@ -10,6 +10,7 @@ import 'home_screen.dart';
 import 'solicitud_horas_extra_screen.dart';
 import 'justificar_ausencia_screen.dart';
 import 'historial_marcaciones_screen.dart';
+import 'perfil_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -80,32 +81,71 @@ class _DashboardScreenState extends State<DashboardScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // 1. CABECERA PERSONALIZADA
+              // 1. CABECERA PERSONALIZADA
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  // Lado Izquierdo: Foto de Perfil + Textos
+                  Row(
                     children: [
-                      Text(
-                        'Hola, $_userName 👋',
-                        style: const TextStyle(
-                          fontSize: 26,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.text, // O Colors.black87
+                      // El Avatar clickeable
+                      GestureDetector(
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (context) => const PerfilScreen()),
+                          );
+                        },
+                        child: Container(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppColors.primary.withOpacity(0.3),
+                                blurRadius: 8,
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
+                          ),
+                          child: const CircleAvatar(
+                            radius: 26,
+                            backgroundColor: AppColors.primary,
+                            // Si a futuro agregas fotos reales a tu base de datos, 
+                            // aquí usarías backgroundImage: NetworkImage(url)
+                            child: Icon(Icons.person, color: Colors.white, size: 30),
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _userArea,
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey.shade600,
-                          fontWeight: FontWeight.w500,
-                        ),
+                      
+                      const SizedBox(width: 16), // Espacio entre foto y texto
+                      
+                      // Textos de Bienvenida
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Hola, $_userName 👋',
+                            style: const TextStyle(
+                              fontSize: 22, // Ajustado ligeramente para encajar mejor
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.text,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _userArea,
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey.shade600,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                  // Botón de Salir con estilo suave
+
+                  // Lado Derecho: Botón de Salir con estilo suave
                   Container(
                     decoration: BoxDecoration(
                       color: Colors.white,
@@ -195,22 +235,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           MaterialPageRoute(
                               builder: (context) =>
                                   HistorialMarcacionesScreen()),
-                        );
-                      },
-                    ),
-
-                    // Opción 5: Más Opciones (Perfil, Config, etc.)
-                    DashboardCard(
-                      icon: Icons.tune_rounded,
-                      title: 'Más\nOpciones',
-                      colorTheme: Colors.purpleAccent,
-                      onTap: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: const Text('Próximamente...'),
-                            behavior: SnackBarBehavior.floating,
-                            backgroundColor: Colors.grey.shade800,
-                          ),
                         );
                       },
                     ),

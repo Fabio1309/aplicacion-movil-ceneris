@@ -1,12 +1,10 @@
 // lib/home_screen.dart (VERSIÓN FINAL CON AVISO DE DÍA LIBRE)
 
 import 'dart:convert';
-import 'dart:io' show Platform;
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:geolocator/geolocator.dart';
-import 'package:device_info_plus/device_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geodesy/geodesy.dart';
 import 'package:hive/hive.dart';
@@ -82,16 +80,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _getDeviceId() async {
-    final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
-    try {
-      if (Platform.isAndroid) {
-        _deviceId = (await deviceInfo.androidInfo).id;
-      } else if (Platform.isIOS) {
-        _deviceId = (await deviceInfo.iosInfo).identifierForVendor;
-      }
-    } catch (e) {
-      print(e);
-    }
+    final prefs = await SharedPreferences.getInstance();
+    // Simplemente abrimos la caja fuerte y leemos el ID que el Login creó
+    _deviceId = prefs.getString('unique_device_id');
+    
+    // (Opcional) Un print para que lo veas en tu terminal de VS Code y confirmes que es el UUID largo
+    print('📱 ID recuperado en la pantalla Home: $_deviceId');
   }
 
   Future<void> _syncPendingAttendances() async {

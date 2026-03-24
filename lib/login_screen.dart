@@ -1,4 +1,4 @@
-// lib/login_screen.dart (DISEÑO MEJORADO)
+// lib/login_screen.dart (DISEÑO MEJORADO CON CAMPO DE CONTRASEÑA)
 
 import 'dart:convert';
 import 'dart:io' show Platform;
@@ -19,11 +19,14 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _dniController = TextEditingController();
+  // NUEVO: Controlador para capturar lo que se escribe en la contraseña
+  final _passwordController = TextEditingController(); 
+  
   final _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
   String? _deviceId;
-  bool _isObscure =
-      true; // Para ocultar/mostrar contraseña si quisieras usarla a futuro
+  // NUEVO: Estado para ocultar/mostrar la contraseña
+  bool _isObscure = true; 
 
   final String _apiUrl = 'https://ceneris-web-oror.onrender.com/api';
 
@@ -31,6 +34,14 @@ class _LoginScreenState extends State<LoginScreen> {
   void initState() {
     super.initState();
     _initializeDeviceId();
+  }
+
+  @override
+  void dispose() {
+    // Buena práctica: limpiar los controladores al cerrar la pantalla
+    _dniController.dispose();
+    _passwordController.dispose();
+    super.dispose();
   }
 
   // --- LOGICA DE DISPOSITIVO (INTACTA) ---
@@ -46,26 +57,19 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<String> getUniqueDeviceId() async {
     final prefs = await SharedPreferences.getInstance();
     String? deviceId = prefs.getString('unique_device_id');
+    
+    // Si la app se instala por primera vez, no hay ID guardado
     if (deviceId == null) {
-      try {
-        final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
-        if (Platform.isAndroid) {
-          final info = await deviceInfo.androidInfo;
-          deviceId = info.id;
-        } else if (Platform.isIOS) {
-          final info = await deviceInfo.iosInfo;
-          deviceId = info.identifierForVendor;
-        }
-      } catch (e) {
-        print('[DEVICE INFO] error leyendo device info: $e');
-      }
-      deviceId ??= const Uuid().v4();
+      // Inventamos un código único en el mundo (ej. 550e8400-e29b-41d4-a716-446655440000)
+      deviceId = const Uuid().v4(); 
+      // Lo guardamos bajo llave. Nunca cambiará a menos que desinstalen la app.
       await prefs.setString('unique_device_id', deviceId);
     }
+    
     return deviceId;
   }
 
-  // --- LOGICA DE LOGIN (INTACTA CON MEJORA DE ERROR) ---
+  // --- LOGICA DE LOGIN ---
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
     if (_deviceId == null) {
@@ -76,8 +80,8 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     final dni = _dniController.text.trim();
-    // Asumimos que la contraseña es el mismo DNI por defecto
-    final password = dni;
+    // NUEVO: Ahora tomamos la contraseña real que escribió el usuario
+    final password = _passwordController.text.trim();
 
     try {
       final Uri loginUri = Uri.parse('$_apiUrl/token/');
@@ -87,7 +91,17 @@ class _LoginScreenState extends State<LoginScreen> {
         'device_id': _deviceId,
       });
 
-      print("[LOGIN] Enviando: $requestBody");
+      // ==========================================================
+      // BLOQUE DE DEPURACIÓN
+      // ==========================================================
+      print('\n======================================================');
+      print('🚀 INICIANDO INTENTO DE LOGIN');
+      print('🌐 URL a la que se apunta: $loginUri');
+      print('👤 Usuario (DNI): "$dni"');
+      print('🔑 Contraseña real enviada: "$password"');
+      print('📱 Device ID capturado: "$_deviceId"');
+      print('======================================================\n');
+      // ==========================================================
 
       final response = await http
           .post(
@@ -109,25 +123,49 @@ class _LoginScreenState extends State<LoginScreen> {
 
         final nombreUsuario = userData['nombre'] ?? 'Usuario';
         final areaUsuario = userData['area'] ?? 'Sin Área';
+        final usuarioSistema = userData['usuario'] ?? ''; // NUEVO
+        final dniReal = userData['dni'] ?? '';
+        final emailReal = userData['email'] ?? 'No registrado';
+        final telefonoReal = userData['telefono'] ?? 'No registrado';
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('authToken', token);
-        await prefs.setString('user_dni', dni);
         await prefs.setString('user_nombre', nombreUsuario);
         await prefs.setString('user_area', areaUsuario);
+        await prefs.setString('user_username', usuarioSistema);
+        await prefs.setString('user_dni', dniReal);
+        await prefs.setString('user_email', emailReal);
+        await prefs.setString('user_telefono', telefonoReal);
 
         _proceedToDashboard();
       } else {
-        print("❌ Error del servidor: ${response.statusCode}");
-        print("❌ Cuerpo de respuesta: ${response.body}");
+        print("\n❌ --- ERROR DE AUTENTICACIÓN --- ❌");
+        print("Código de estado: ${response.statusCode}");
+        print("Respuesta del servidor: ${response.body}");
+        print("------------------------------------\n");
 
         try {
           final errorData = json.decode(utf8.decode(response.bodyBytes));
-          final errorMessage = errorData['detail'] ??
-              errorData['non_field_errors']?[0] ??
-              'Credenciales incorrectas.';
+          String errorMessage = 'Credenciales incorrectas.';
+
+          // 1. Revisamos si viene el campo "detail"
+          if (errorData['detail'] != null) {
+            if (errorData['detail'] is List) {
+              errorMessage = errorData['detail'][0]; // Extraemos el texto de la lista
+            } else {
+              errorMessage = errorData['detail'].toString(); // Lo tomamos como texto directo
+            }
+          } 
+          // 2. Si no viene "detail", revisamos si viene "non_field_errors"
+          else if (errorData['non_field_errors'] != null && errorData['non_field_errors'] is List) {
+            errorMessage = errorData['non_field_errors'][0];
+          }
+
+          // 3. Mostramos el mensaje exacto en la pantalla
           _showError(errorMessage);
+          
         } catch (e) {
+          // Si el servidor manda un HTML o algo que no es JSON
           _showError('Error del servidor (${response.statusCode}).');
         }
       }
@@ -167,20 +205,18 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // --- NUEVO DISEÑO VISUAL ---
   @override
   Widget build(BuildContext context) {
-    // Obtenemos el tamaño de la pantalla
     final size = MediaQuery.of(context).size;
 
     return Scaffold(
-      backgroundColor: Colors.white, // Fondo base
+      backgroundColor: Colors.white,
       body: SingleChildScrollView(
         child: SizedBox(
           height: size.height,
           child: Stack(
             children: [
-              // 1. Fondo Superior con Degradado Curvo
+              // 1. Fondo Superior
               Positioned(
                 top: 0,
                 left: 0,
@@ -204,15 +240,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      // AQUÍ CAMBIAS LA IMAGEN
-                      // Asegúrate de que la ruta 'assets/images/logo_login.png' exista
-                      // Si no tienes imagen aún, usa un Icono grande temporalmente:
                       Container(
                         padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
+                        decoration: const BoxDecoration(
                           shape: BoxShape.circle,
                         ),
-                        // Cambia esto por Image.asset('assets/images/logo_login.png', height: 100)
                         child: Image.asset(
                           'assets/images/image.png',
                           height: 100,
@@ -233,9 +265,9 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
 
-              // 2. Tarjeta del Formulario (Flotante)
+              // 2. Tarjeta del Formulario
               Positioned(
-                top: size.height * 0.38, // Ajusta para que solape el fondo
+                top: size.height * 0.38,
                 left: 20,
                 right: 20,
                 child: Card(
@@ -272,11 +304,10 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           const SizedBox(height: 30),
 
-                          // Input DNI Estilizado
+                          // --- INPUT DNI ---
                           TextFormField(
                             controller: _dniController,
-                            keyboardType: TextInputType.number,
-                            maxLength: 8,
+                            keyboardType: TextInputType.text,
                             style: const TextStyle(fontWeight: FontWeight.w500),
                             decoration: InputDecoration(
                               labelText: 'DNI / Usuario',
@@ -298,20 +329,73 @@ class _LoginScreenState extends State<LoginScreen> {
                                 borderSide: const BorderSide(
                                     color: AppColors.primary, width: 1.5),
                               ),
-                              counterText: "", // Oculta el contador pequeño
+                              counterText: "",
                             ),
                             validator: (value) {
-                              if (value == null || value.trim().isEmpty)
-                                return 'Ingrese su DNI';
-                              if (value.length < 8)
-                                return 'DNI inválido (mín. 8 dígitos)';
+                              if (value == null || value.trim().isEmpty) {
+                                return 'Ingrese su usuario';
+                              }
+                              if (value.trim().length < 3) {
+                                return 'Usuario inválido (mín. 3 caracteres)';
+                              }
+                              return null;
+                            },
+                          ),
+
+                          const SizedBox(height: 20),
+
+                          // --- NUEVO INPUT: CONTRASEÑA ---
+                          TextFormField(
+                            controller: _passwordController,
+                            // obscureText oculta los caracteres si está en true
+                            obscureText: _isObscure, 
+                            style: const TextStyle(fontWeight: FontWeight.w500),
+                            decoration: InputDecoration(
+                              labelText: 'Contraseña',
+                              prefixIcon: const Icon(Icons.lock_outline,
+                                  color: AppColors.primary),
+                              // Botón de ojito para mostrar/ocultar contraseña
+                              suffixIcon: IconButton(
+                                icon: Icon(
+                                  _isObscure
+                                      ? Icons.visibility_off
+                                      : Icons.visibility,
+                                  color: Colors.grey,
+                                ),
+                                onPressed: () {
+                                  setState(() {
+                                    _isObscure = !_isObscure;
+                                  });
+                                },
+                              ),
+                              filled: true,
+                              fillColor: Colors.grey.shade50,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide.none,
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide:
+                                    BorderSide(color: Colors.grey.shade200),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: const BorderSide(
+                                    color: AppColors.primary, width: 1.5),
+                              ),
+                            ),
+                            validator: (value) {
+                              if (value == null || value.trim().isEmpty) {
+                                return 'Ingrese su contraseña';
+                              }
                               return null;
                             },
                           ),
 
                           const SizedBox(height: 30),
 
-                          // Botón de Login
+                          // --- BOTÓN DE LOGIN ---
                           _isLoading
                               ? const Center(
                                   child: CircularProgressIndicator(
@@ -337,8 +421,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       shape: RoundedRectangleBorder(
                                         borderRadius: BorderRadius.circular(12),
                                       ),
-                                      elevation:
-                                          0, // Quitamos elevación predeterminada para usar la sombra custom
+                                      elevation: 0,
                                     ),
                                     child: const Text(
                                       'INICIAR SESIÓN',
@@ -357,7 +440,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
 
-              // 3. Texto inferior (Footer)
+              // 3. Texto inferior
               Positioned(
                 bottom: 20,
                 left: 0,
