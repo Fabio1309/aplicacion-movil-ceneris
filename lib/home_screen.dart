@@ -208,11 +208,36 @@ class _HomeScreenState extends State<HomeScreen> {
 
       Position pos = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.high);
+          
+      // ==============================================================
+      // 🚨 1. ESCUDO ANTI-FRAUDE: Detectar y acusar con Django
+      // ==============================================================
       if (pos.isMocked) {
-        if (mounted)
+        if (mounted) {
           setState(() => _statusMessage = '❌ Ubicación falsa detectada.');
-        return;
+        }
+
+        // Si hay internet, le avisamos a Django inmediatamente
+        if (hasInternet) {
+          final fraudData = {
+            'tipo_marcacion': markingType,
+            'latitud': pos.latitude,
+            'longitud': pos.longitude,
+            'device_id': _deviceId,
+            'nombre_ubicacion': 'Fake GPS',
+            'timestamp': DateTime.now().toIso8601String(),
+            // ---> ESTAS DOS LÍNEAS ACTIVAN LA ALARMA EN DJANGO <---
+            'is_fraud': true, 
+            'reason': 'Uso de Fake GPS / Ubicación simulada',
+          };
+          
+          // Enviamos el fraude usando tu misma función
+          await _postAttendanceToBackend(fraudData);
+        }
+        
+        return; // Ahora sí, cortamos la ejecución para que no marque normal
       }
+      // ==============================================================
 
       if (mounted) setState(() => _statusMessage = 'Validando zona...');
       bool isAllowed = false;
@@ -252,6 +277,9 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
 
+      // ==============================================================
+      // --- 2. MARCAR ASISTENCIA NORMAL ---
+      // ==============================================================
       if (isAllowed) {
         final data = {
           'tipo_marcacion': markingType,
