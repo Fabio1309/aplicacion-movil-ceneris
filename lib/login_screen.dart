@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'dashboard_screen.dart';
 import 'app_colors.dart';
+import 'services/secure_credential_store.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -106,10 +107,13 @@ class _LoginScreenState extends State<LoginScreen> {
       final response = await http
           .post(
             loginUri,
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+              'Content-Type': 'application/json',
+              'Connection': 'close',
+            },
             body: requestBody,
           )
-          .timeout(const Duration(seconds: 20));
+          .timeout(const Duration(seconds: 45));
 
       if (response.statusCode == 200) {
         final responseData = json.decode(utf8.decode(response.bodyBytes));
@@ -136,6 +140,14 @@ class _LoginScreenState extends State<LoginScreen> {
         await prefs.setString('user_dni', dniReal);
         await prefs.setString('user_email', emailReal);
         await prefs.setString('user_telefono', telefonoReal);
+
+        // CAV-181: guardamos el hash cifrado de la credencial que acaba
+        // de validarse contra el backend, para poder re-verificarla
+        // localmente (por ejemplo, sin conexión) más adelante.
+        await SecureCredentialStore().saveCredentialHash(
+          username: dni,
+          password: password,
+        );
 
         _proceedToDashboard();
       } else {

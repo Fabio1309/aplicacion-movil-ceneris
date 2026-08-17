@@ -14,6 +14,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'login_screen.dart';
 import 'dashboard_screen.dart';
 import 'app_colors.dart';
+import 'services/user_sync_service.dart';
 
 class HomeScreen extends StatefulWidget {
   final String dni;
@@ -131,7 +132,7 @@ class _HomeScreenState extends State<HomeScreen> {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token'
         },
-      ).timeout(const Duration(seconds: 15));
+      ).timeout(const Duration(seconds: 45));
 
       if (response.statusCode == 200) {
         final data = json.decode(utf8.decode(response.bodyBytes));
@@ -142,6 +143,23 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (e) {
       _loadCachedConfig(prefs);
+    }
+
+    // CAV-182 (cliente): sincroniza en segundo plano la lista de usuarios
+    // autorizados. No debe bloquear ni romper la carga del dashboard si
+    // falla (por ejemplo, sin conexión): solo se registra el error.
+    unawaited(_syncAuthorizedUsers(token));
+  }
+
+  Future<void> _syncAuthorizedUsers(String token) async {
+    try {
+      final syncService = UserSyncService(apiUrl: _apiUrl);
+      await syncService.sync(token: token);
+    } catch (e) {
+      // Sincronización silenciosa: si falla (sin conexión, checksum
+      // inválido, etc.) simplemente se reintentará la próxima vez que
+      // se abra esta pantalla, sin afectar el resto de la app.
+      debugPrint('CAV-182: no se pudo sincronizar usuarios autorizados: $e');
     }
   }
 
