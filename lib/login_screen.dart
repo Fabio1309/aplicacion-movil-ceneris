@@ -10,6 +10,9 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'dashboard_screen.dart';
 import 'app_colors.dart';
 import 'services/secure_credential_store.dart';
+import 'services/offline_login_validator.dart';
+import 'services/user_sync_service.dart';
+import 'services/offline_login_event_queue.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -149,6 +152,26 @@ class _LoginScreenState extends State<LoginScreen> {
           password: password,
         );
 
+        // CAV-83: recién obtuvimos un token válido; es el único momento en
+        // que se puede reportar a Django cualquier login offline que haya
+        // quedado pendiente de sincronizar en este dispositivo.
+        try {
+          await OfflineLoginEventQueue().flush(apiUrl: _apiUrl, token: token);
+        } catch (e) {
+          print('No se pudo sincronizar eventos de login offline: $e');
+        }
+
+        // CAV-82: refrescamos la lista de usuarios autorizados en todo
+        // login online exitoso (no solo al entrar a Marcar Asistencia),
+        // para que un trabajador que se va a zona sin señal quede con la
+        // ventana de 30 días vigente desde su último login, sin depender
+        // de que haya visitado esa pantalla primero.
+        try {
+          await UserSyncService(apiUrl: _apiUrl).sync(token: token);
+        } catch (e) {
+          print('No se pudo sincronizar usuarios autorizados: $e');
+        }
+
         _proceedToDashboard();
       } else {
         print("\n❌ --- ERROR DE AUTENTICACIÓN --- ❌");
@@ -182,11 +205,60 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       }
     } catch (e) {
-      _showError('Error de conexión. Verifique su internet.');
-      print("Error en login: $e");
+      print("Error en login online: $e");
+      // CAV-80: si el login contra el servidor no se pudo completar
+      // (por ejemplo, sin conexión), intentamos validar localmente
+      // contra las credenciales guardadas la última vez que este
+      // usuario entró bien en este mismo dispositivo.
+      await _attemptOfflineLogin(username: dni, password: password);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  /// CAV-81/82/83: intento de login sin conexión. Solo se llega aquí
+  /// cuando el login online (arriba) no pudo completarse.
+  Future<void> _attemptOfflineLogin({
+    required String username,
+    required String password,
+  }) async {
+    final validator = OfflineLoginValidator(
+      userSyncService: UserSyncService(apiUrl: _apiUrl),
+    );
+
+    final resultado = await validator.validar(
+      username: username,
+      password: password,
+    );
+
+    if (!resultado.success) {
+      _showError(resultado.mensajeParaUsuario);
+      return;
+    }
+
+    // CAV-83: dejamos registrado que este login fue offline, para
+    // reportárselo a Django apenas vuelva la conexión.
+    if (_deviceId != null) {
+      await OfflineLoginEventQueue().enqueue(
+        deviceId: _deviceId!,
+        fechaHoraOffline: DateTime.now(),
+      );
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Sesión iniciada sin conexión.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      // Pequeña pausa para que el mensaje se alcance a ver antes de
+      // navegar (pushReplacement quita esta pantalla, y con ella
+      // cualquier SnackBar que estuviera mostrando).
+      await Future.delayed(const Duration(milliseconds: 900));
+    }
+
+    _proceedToDashboard();
   }
 
   void _proceedToDashboard() {

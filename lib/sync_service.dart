@@ -2,15 +2,25 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:hive/hive.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'services/offline_login_event_queue.dart';
 
 class SyncService {
+  SyncService({String? apiUrl, OfflineLoginEventQueue? offlineLoginQueue})
+      : _apiUrl = apiUrl ?? 'https://ceneris-web-oror.onrender.com/api',
+        _offlineLoginQueue = offlineLoginQueue ?? OfflineLoginEventQueue();
+
   final Box _pendingBox = Hive.box('asistencias_pendientes');
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final String _apiUrl;
+  final OfflineLoginEventQueue _offlineLoginQueue;
   bool _isSyncing = false;
 
   void startListening() {
     print("SyncService: Iniciando y escuchando cambios de conexión...");
     syncPendingAttendances();
+    syncPendingOfflineLoginEvents();
 
     Connectivity().onConnectivityChanged.listen((results) {
       if (results.contains(ConnectivityResult.mobile) ||
@@ -19,10 +29,28 @@ class SyncService {
           'SyncService: Conexión a internet detectada. Intentando sincronizar...',
         );
         syncPendingAttendances();
+        syncPendingOfflineLoginEvents();
       } else {
         print('SyncService: Sin conexión a internet.');
       }
     });
+  }
+
+  /// CAV-83: al volver la conexión, reporta a Django los logins offline
+  /// que quedaron pendientes en la cola local (CAV-81/82).
+  Future<void> syncPendingOfflineLoginEvents() async {
+    if (!_offlineLoginQueue.hayPendientes) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('authToken');
+    if (token == null) return; // Sin sesión válida, no hay con qué reportar.
+
+    try {
+      await _offlineLoginQueue.flush(apiUrl: _apiUrl, token: token);
+      print('SyncService: Eventos de login offline sincronizados.');
+    } catch (e) {
+      print('SyncService: No se pudo sincronizar login offline: $e');
+    }
   }
 
   Future<void> syncPendingAttendances() async {

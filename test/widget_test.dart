@@ -2,8 +2,8 @@
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:assistenciaceneris_app/main.dart';
-import 'package:assistenciaceneris_app/home_screen.dart'; // Importa HomeScreen para poder buscarla
+import 'package:ceneris/main.dart';
+import 'package:ceneris/home_screen.dart'; // Importa HomeScreen para poder buscarla
 
 void main() {
   // Renombramos la prueba para que tenga sentido
