@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/authorized_user.dart';
 import 'secure_store.dart';
@@ -26,16 +25,26 @@ class UserSyncService {
     required this.apiUrl,
     SecureStore? secureStore,
     http.Client? httpClient,
+    Duration? authorizedListValidity,
   })  : _secureStore = secureStore ?? FlutterSecureCredentialStorage(),
-        _httpClient = httpClient ?? http.Client();
+        _httpClient = httpClient ?? http.Client(),
+        authorizedListValidity =
+            authorizedListValidity ?? defaultAuthorizedListValidity;
 
   static const _storedListKey = 'usuarios_autorizados_json';
   static const _storedChecksumKey = 'usuarios_autorizados_checksum';
   static const _lastSyncPrefsKey = 'usuarios_autorizados_last_sync';
 
+  /// CAV-82: los trabajadores de esta app pueden quedar semanas sin
+  /// señal (zonas mineras remotas), por eso la vigencia por defecto es
+  /// larga (30 dias) en vez de horas/pocos dias. Es configurable por si
+  /// una operacion puntual necesita una politica distinta.
+  static const Duration defaultAuthorizedListValidity = Duration(days: 30);
+
   final String apiUrl;
   final SecureStore _secureStore;
   final http.Client _httpClient;
+  final Duration authorizedListValidity;
 
   /// Recalcula el mismo checksum que genera el backend: SHA-256 sobre el
   /// JSON canonico (ordenado por dni, sin espacios) de la lista recibida.
@@ -55,8 +64,7 @@ class UserSyncService {
   /// Lanza [IntegrityException] si el checksum no coincide: en ese caso
   /// la respuesta se descarta y NO se toca lo que ya habia almacenado.
   Future<List<AuthorizedUser>> sync({required String token}) async {
-    final prefs = await SharedPreferences.getInstance();
-    final since = prefs.getString(_lastSyncPrefsKey);
+    final since = await _secureStore.read(key: _lastSyncPrefsKey);
 
     final uri = Uri.parse('$apiUrl/usuarios-autorizados/sync/').replace(
       queryParameters: since != null ? {'since': since} : null,
@@ -99,7 +107,7 @@ class UserSyncService {
     final listaFinal = merged.values.toList();
 
     await _guardarLista(listaFinal);
-    await prefs.setString(_lastSyncPrefsKey, version);
+    await _secureStore.write(key: _lastSyncPrefsKey, value: version);
 
     return listaFinal.where((u) => u.activo).toList();
   }
@@ -134,9 +142,32 @@ class UserSyncService {
   /// Lista local ya sincronizada, sin llamar a la red (para uso offline).
   Future<List<AuthorizedUser>> obtenerListaLocal() => _leerListaAlmacenada();
 
-  /// Verifica localmente si [dni] esta autorizado y activo, sin red.
-  Future<bool> esUsuarioAutorizado(String dni) async {
+  /// Verifica localmente si [username] esta autorizado y activo, sin
+  /// red. Se compara contra 'username' (no 'dni'): es el mismo campo
+  /// que la app usa para loguearse (Django USERNAME_FIELD='username'),
+  /// que no siempre coincide con el numero de DNI del trabajador.
+  Future<bool> esUsuarioAutorizado(String username) async {
     final lista = await _leerListaAlmacenada();
-    return lista.any((u) => u.dni == dni && u.activo);
+    return lista.any((u) => u.username == username && u.activo);
+  }
+
+  /// Momento (segun el reloj del servidor) de la ultima sincronizacion
+  /// exitosa, o `null` si el dispositivo nunca ha sincronizado.
+  Future<DateTime?> ultimaSincronizacion() async {
+    final raw = await _secureStore.read(key: _lastSyncPrefsKey);
+    if (raw == null) return null;
+    return DateTime.tryParse(raw);
+  }
+
+  /// CAV-82: la lista local se considera "vencida" si nunca se
+  /// sincronizo, o si la ultima sincronizacion exitosa fue hace mas de
+  /// [authorizedListValidity]. Con la lista vencida, el login offline
+  /// debe bloquearse aunque las credenciales sean correctas: obliga a
+  /// que el dispositivo se conecte al menos una vez dentro de esa
+  /// ventana para seguir confiando en los datos que tiene guardados.
+  Future<bool> listaAutorizadosVencida() async {
+    final ultima = await ultimaSincronizacion();
+    if (ultima == null) return true;
+    return DateTime.now().difference(ultima) > authorizedListValidity;
   }
 }

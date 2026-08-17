@@ -25,9 +25,10 @@ Future<void> main() async {
   // 1. Inicialización de Firebase
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // 2. Inicialización de Hive (solo para asistencias offline)
+  // 2. Inicialización de Hive (asistencias offline + eventos de login offline)
   await Hive.initFlutter();
   await Hive.openBox('asistencias_pendientes');
+  await Hive.openBox('eventos_login_offline'); // CAV-83
 
   // 3. Inicia el servicio de sincronización en segundo plano
   SyncService().startListening();
