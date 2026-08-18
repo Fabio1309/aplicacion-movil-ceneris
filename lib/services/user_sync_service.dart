@@ -25,26 +25,16 @@ class UserSyncService {
     required this.apiUrl,
     SecureStore? secureStore,
     http.Client? httpClient,
-    Duration? authorizedListValidity,
   })  : _secureStore = secureStore ?? FlutterSecureCredentialStorage(),
-        _httpClient = httpClient ?? http.Client(),
-        authorizedListValidity =
-            authorizedListValidity ?? defaultAuthorizedListValidity;
+        _httpClient = httpClient ?? http.Client();
 
   static const _storedListKey = 'usuarios_autorizados_json';
   static const _storedChecksumKey = 'usuarios_autorizados_checksum';
   static const _lastSyncPrefsKey = 'usuarios_autorizados_last_sync';
 
-  /// CAV-82: los trabajadores de esta app pueden quedar semanas sin
-  /// señal (zonas mineras remotas), por eso la vigencia por defecto es
-  /// larga (30 dias) en vez de horas/pocos dias. Es configurable por si
-  /// una operacion puntual necesita una politica distinta.
-  static const Duration defaultAuthorizedListValidity = Duration(days: 30);
-
   final String apiUrl;
   final SecureStore _secureStore;
   final http.Client _httpClient;
-  final Duration authorizedListValidity;
 
   /// Recalcula el mismo checksum que genera el backend: SHA-256 sobre el
   /// JSON canonico (ordenado por dni, sin espacios) de la lista recibida.
@@ -159,15 +149,13 @@ class UserSyncService {
     return DateTime.tryParse(raw);
   }
 
-  /// CAV-82: la lista local se considera "vencida" si nunca se
-  /// sincronizo, o si la ultima sincronizacion exitosa fue hace mas de
-  /// [authorizedListValidity]. Con la lista vencida, el login offline
-  /// debe bloquearse aunque las credenciales sean correctas: obliga a
-  /// que el dispositivo se conecte al menos una vez dentro de esa
-  /// ventana para seguir confiando en los datos que tiene guardados.
-  Future<bool> listaAutorizadosVencida() async {
+  /// CAV-82 (ajustado): el acceso offline ya no caduca por tiempo — un
+  /// trabajador en zona minera puede estar semanas o meses sin señal.
+  /// La unica condicion es que el dispositivo se haya conectado y
+  /// sincronizado la lista de usuarios autorizados AL MENOS UNA VEZ;
+  /// sin eso no hay nada confiable contra que validar el login offline.
+  Future<bool> nuncaSincronizado() async {
     final ultima = await ultimaSincronizacion();
-    if (ultima == null) return true;
-    return DateTime.now().difference(ultima) > authorizedListValidity;
+    return ultima == null;
   }
 }
