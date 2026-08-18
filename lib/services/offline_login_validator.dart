@@ -3,9 +3,11 @@ import 'user_sync_service.dart';
 
 /// Motivo por el que un intento de login offline fue rechazado.
 enum OfflineLoginFailureReason {
-  /// La lista local de usuarios autorizados esta vencida (CAV-82): el
-  /// dispositivo lleva demasiado tiempo sin conectarse a internet.
-  authorizedListExpired,
+  /// Este dispositivo nunca se conecto ni sincronizo la lista de
+  /// usuarios autorizados (CAV-82): sin eso no hay nada confiable
+  /// contra que validar un login offline. No caduca por tiempo, solo
+  /// exige haberse conectado al menos una vez.
+  authorizedListNeverSynced,
 
   /// La contraseña ingresada no coincide con el hash guardado en este
   /// dispositivo (o nunca hubo un login online exitoso aqui).
@@ -30,10 +32,9 @@ class OfflineLoginResult {
   /// Mensaje listo para mostrar en pantalla.
   String get mensajeParaUsuario {
     switch (failureReason) {
-      case OfflineLoginFailureReason.authorizedListExpired:
-        return 'Tu dispositivo lleva demasiado tiempo sin conectarse a '
-            'internet. Conéctate al menos una vez para poder ingresar '
-            'sin conexión.';
+      case OfflineLoginFailureReason.authorizedListNeverSynced:
+        return 'Este dispositivo nunca se ha conectado a internet. '
+            'Conéctate al menos una vez para poder ingresar sin conexión.';
       case OfflineLoginFailureReason.invalidCredentials:
         return 'Usuario o contraseña incorrectos.';
       case OfflineLoginFailureReason.notAuthorized:
@@ -61,11 +62,11 @@ class OfflineLoginValidator {
     required String username,
     required String password,
   }) async {
-    // CAV-82: primero se revisa la vigencia de la lista. Si esta vencida
-    // se bloquea de inmediato, sin importar si la contraseña es correcta.
-    if (await _userSyncService.listaAutorizadosVencida()) {
+    // CAV-82: el acceso offline es indefinido en el tiempo; solo se
+    // exige que el dispositivo se haya sincronizado alguna vez.
+    if (await _userSyncService.nuncaSincronizado()) {
       return const OfflineLoginResult.failure(
-        OfflineLoginFailureReason.authorizedListExpired,
+        OfflineLoginFailureReason.authorizedListNeverSynced,
       );
     }
 

@@ -149,14 +149,15 @@ void main() {
       expect(resultado.success, isFalse);
       expect(
         resultado.failureReason,
-        OfflineLoginFailureReason.authorizedListExpired,
+        OfflineLoginFailureReason.authorizedListNeverSynced,
       );
     });
 
-    test('rechaza si la lista esta vencida aunque las credenciales sean '
-        'correctas (politica minera: 30 dias)', () async {
-      // Sincronizamos, pero con una vigencia artificialmente muy corta
-      // para simular que ya pasaron los 30 dias sin volver a sincronizar.
+    test('permite el login offline aunque la ultima sincronizacion haya '
+        'sido hace mucho tiempo (CAV-82: acceso indefinido, sin '
+        'caducidad por dias)', () async {
+      // Sincronizamos con una version/fecha muy antigua: ya no debe
+      // bloquear, porque el acceso offline no caduca por tiempo.
       final usuarios = [
         {
           'dni': '70521334',
@@ -171,7 +172,7 @@ void main() {
         return http.Response(
           jsonEncode({
             'version': DateTime.now()
-                .subtract(const Duration(days: 40))
+                .subtract(const Duration(days: 200))
                 .toIso8601String(),
             'checksum': checksum,
             'usuarios': usuarios,
@@ -184,7 +185,6 @@ void main() {
         apiUrl: 'http://127.0.0.1:8001/api',
         secureStore: fakeStore,
         httpClient: mockClient,
-        authorizedListValidity: const Duration(days: 30),
       );
       await syncService.sync(token: 'fake-token');
 
@@ -198,11 +198,7 @@ void main() {
         password: password,
       );
 
-      expect(resultado.success, isFalse);
-      expect(
-        resultado.failureReason,
-        OfflineLoginFailureReason.authorizedListExpired,
-      );
+      expect(resultado.success, isTrue);
     });
   });
 }

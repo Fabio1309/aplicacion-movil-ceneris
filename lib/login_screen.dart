@@ -247,15 +247,32 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Sesión iniciada sin conexión.'),
-          duration: Duration(seconds: 2),
+        SnackBar(
+          content: const Row(
+            children: [
+              Icon(Icons.wifi_off_rounded, color: Colors.white),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Sesión iniciada SIN CONEXIÓN',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.orange.shade800,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         ),
       );
-      // Pequeña pausa para que el mensaje se alcance a ver antes de
-      // navegar (pushReplacement quita esta pantalla, y con ella
-      // cualquier SnackBar que estuviera mostrando).
-      await Future.delayed(const Duration(milliseconds: 900));
+      // Pausa para que el mensaje se alcance a ver antes de navegar
+      // (pushReplacement quita esta pantalla, y con ella cualquier
+      // SnackBar que estuviera mostrando).
+      await Future.delayed(const Duration(milliseconds: 1500));
     }
 
     _proceedToDashboard();
