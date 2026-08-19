@@ -4,6 +4,7 @@ import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'config/api_config.dart';
 
 class JustificarAusenciaScreen extends StatefulWidget {
   const JustificarAusenciaScreen({super.key});
@@ -18,7 +19,7 @@ class _JustificarAusenciaScreenState extends State<JustificarAusenciaScreen> {
   DateTime? _selectedDay;
   Map<String, dynamic> _dataPorFecha = {};
   bool _isLoading = true;
-  final String _baseUrl = 'https://ceneris-web-oror.onrender.com/api';
+  final String _baseUrl = ApiConfig.baseUrl;
 
   final _formKey = GlobalKey<FormState>();
   final _descripcionController = TextEditingController();

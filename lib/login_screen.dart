@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'dashboard_screen.dart';
 import 'app_colors.dart';
+import 'config/api_config.dart';
 import 'services/secure_credential_store.dart';
 import 'services/offline_login_validator.dart';
 import 'services/user_sync_service.dart';
@@ -32,7 +33,7 @@ class _LoginScreenState extends State<LoginScreen> {
   // NUEVO: Estado para ocultar/mostrar la contraseña
   bool _isObscure = true; 
 
-  final String _apiUrl = 'https://ceneris-web-oror.onrender.com/api';
+  final String _apiUrl = ApiConfig.baseUrl;
 
   @override
   void initState() {
