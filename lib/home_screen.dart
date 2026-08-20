@@ -8,13 +8,16 @@ import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geodesy/geodesy.dart';
 import 'package:hive/hive.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:uuid/uuid.dart';
 
 // --- TUS IMPORTACIONES ---
 import 'login_screen.dart';
 import 'dashboard_screen.dart';
 import 'app_colors.dart';
 import 'config/api_config.dart';
+import 'sync_service.dart';
+import 'services/auth_token_provider.dart';
+import 'services/network_status.dart';
 import 'services/user_sync_service.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -33,8 +36,8 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
-  late StreamSubscription<List<ConnectivityResult>> _connectivitySubscription;
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+  StreamSubscription<void>? _connectivitySubscription;
 
   // --- VARIABLES DE ESTADO ---
   String _statusMessage = 'Cargando datos...';
@@ -62,21 +65,34 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initializeScreen();
+
+    // Stream unificado: reacciona a cualquier interfaz activa (datos móviles,
+    // Wi-Fi, hotspot compartido, ethernet o VPN), no solo a `mobile`/`wifi`.
     _connectivitySubscription =
-        Connectivity().onConnectivityChanged.listen((results) {
-      if (results.contains(ConnectivityResult.mobile) ||
-          results.contains(ConnectivityResult.wifi)) {
-        _syncPendingAttendances();
-        _fetchInitialDataFromBackend();
-      }
+        NetworkStatus.instance.onConnectivityRestored.listen((_) {
+      SyncService.instance.scheduleSync();
+      _fetchInitialDataFromBackend();
     });
   }
 
   @override
   void dispose() {
-    _connectivitySubscription.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _connectivitySubscription?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Volver del background es el momento típico en que el usuario ya
+    // recuperó señal: el evento de conectividad pudo ocurrir con la app
+    // suspendida, sin que nadie lo escuchara.
+    if (state == AppLifecycleState.resumed) {
+      NetworkStatus.instance.invalidateCache();
+      SyncService.instance.scheduleSync();
+    }
   }
 
   Future<void> _initializeScreen() async {
@@ -94,31 +110,34 @@ class _HomeScreenState extends State<HomeScreen> {
     print('📱 ID recuperado en la pantalla Home: $_deviceId');
   }
 
-  Future<void> _syncPendingAttendances() async {
-    var box = Hive.box('asistencias_pendientes');
-    if (box.isEmpty) return;
-    final connectivityResult = await Connectivity().checkConnectivity();
-    if (connectivityResult.contains(ConnectivityResult.none)) return;
+  /// Encola una marca para que la suba [SyncService].
+  ///
+  /// Antes existía aquí un segundo sincronizador propio de la pantalla que
+  /// borraba el registro de Hive sin mirar el `statusCode`: con el token
+  /// caducado, Django respondía 401 y la marca se destruía en silencio.
+  /// Ahora la pantalla solo encola; subir (y decidir qué se borra) es
+  /// responsabilidad exclusiva del worker.
+  Future<void> _encolarMarca(
+    Map<String, dynamic> data, {
+    required String mensaje,
+  }) async {
+    final registro = Map<String, dynamic>.from(data);
+    // Clave de idempotencia: sobrevive a los reintentos, de modo que una
+    // petición que sí llegó pero cuya respuesta se perdió no genere una
+    // marca duplicada.
+    registro.putIfAbsent('client_uuid', () => const Uuid().v4());
+    registro['intentos'] = 0;
 
-    final Map<dynamic, dynamic> rawMap = box.toMap();
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('authToken');
+    await Hive.box(SyncService.pendingBoxName).add(registro);
+    SyncService.instance.scheduleSync();
 
-    for (var key in rawMap.keys) {
-      final data = rawMap[key];
-      try {
-        await http.post(
-          Uri.parse('$_apiUrl/asistencias/registrar/'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $token'
-          },
-          body: json.encode(data),
-        );
-        await box.delete(key);
-      } catch (e) {
-        break;
-      }
+    if (mounted) {
+      setState(() {
+        if (registro['is_fraud'] != true) {
+          _lastMarkingType = registro['tipo_marcacion'];
+        }
+        _statusMessage = mensaje;
+      });
     }
   }
 
@@ -232,10 +251,11 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
-      final connectivityResult = await Connectivity().checkConnectivity();
-      bool hasInternet =
-          connectivityResult.contains(ConnectivityResult.mobile) ||
-              connectivityResult.contains(ConnectivityResult.wifi);
+      // Chequeo ACTIVO, no el estado de la interfaz: estar asociado a un
+      // hotspot compartido sin datos, a un router sin servicio o a un portal
+      // cautivo también se reporta como "wifi conectado".
+      final bool hasInternet =
+          await NetworkStatus.instance.hasRealInternet(force: true);
 
       if (!await _ensureLocationPermissionAndService()) return;
 
@@ -326,12 +346,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (hasInternet) {
           await _postAttendanceToBackend(data);
         } else {
-          await Hive.box('asistencias_pendientes').add(data);
-          if (mounted)
-            setState(() {
-              _lastMarkingType = markingType;
-              _statusMessage = '✅ Guardado Offline.';
-            });
+          await _encolarMarca(data, mensaje: '✅ Guardado Offline.');
         }
       } else {
         if (mounted) setState(() => _statusMessage = '❌ Estás fuera del área.');
@@ -344,35 +359,53 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _postAttendanceToBackend(Map<String, dynamic> data) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('authToken');
-    try {
-      final response = await http.post(
-        Uri.parse('$_apiUrl/asistencias/registrar/'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token'
-        },
-        body: json.encode(data),
-      );
+    final token = await AuthTokenProvider().getAccessToken();
+    // El mismo `client_uuid` viaja en el camino online: si la respuesta se
+    // pierde y la marca acaba encolada, el backend puede reconocerla.
+    final payload = Map<String, dynamic>.from(data)
+      ..putIfAbsent('client_uuid', () => const Uuid().v4());
 
-      if (response.statusCode == 201) {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$_apiUrl/asistencias/registrar/'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token'
+            },
+            body: json.encode(payload),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      if (response.statusCode == 201 || response.statusCode == 200) {
         if (mounted) {
           setState(() {
-            _lastMarkingType = data['tipo_marcacion'];
+            _lastMarkingType = payload['tipo_marcacion'];
             _statusMessage =
                 _lastMarkingType == 'Entrada' ? '✅ ENTRADA OK' : '✅ SALIDA OK';
             _fetchInitialDataFromBackend();
           });
         }
-      } else {
-        final errorData = json.decode(utf8.decode(response.bodyBytes));
-        if (mounted)
-          setState(
-              () => _statusMessage = '❌ ${errorData['detail'] ?? 'Error'}');
+        return;
+      }
+
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        // Sesión caducada en pleno envío: la marca NO se pierde. El worker
+        // renovará el token con el refresh y la subirá.
+        await _encolarMarca(payload,
+            mensaje: '⏳ Sesión caducada. Marca guardada, se subirá sola.');
+        return;
+      }
+
+      final errorData = json.decode(utf8.decode(response.bodyBytes));
+      if (mounted) {
+        setState(() => _statusMessage = '❌ ${errorData['detail'] ?? 'Error'}');
       }
     } catch (e) {
-      if (mounted) setState(() => _statusMessage = '❌ Error de red.');
+      // La conexión se cayó entre la verificación y el envío (o el servidor
+      // no respondió a tiempo). Encolamos en vez de perder la marcación.
+      await _encolarMarca(payload,
+          mensaje: '⚠️ Sin conexión al enviar. Guardado offline.');
     }
   }
 
@@ -399,6 +432,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _logout() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
+    // El refresh vive en el almacén cifrado, no en prefs: hay que borrarlo
+    // aparte para no dejar una sesión renovable tras el logout.
+    await AuthTokenProvider().clearRefreshToken();
     if (mounted) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (context) => const LoginScreen()),

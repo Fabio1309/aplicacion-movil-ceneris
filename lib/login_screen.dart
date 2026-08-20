@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dashboard_screen.dart';
 import 'app_colors.dart';
 import 'config/api_config.dart';
+import 'services/auth_token_provider.dart';
 import 'services/secure_credential_store.dart';
 import 'services/offline_login_validator.dart';
 import 'services/user_sync_service.dart';
@@ -119,6 +120,10 @@ class _LoginScreenState extends State<LoginScreen> {
       if (response.statusCode == 200) {
         final responseData = json.decode(utf8.decode(response.bodyBytes));
         final token = responseData['access'];
+        // El `refresh` de SimpleJWT se descartaba: sin él, un token que
+        // caducaba durante el periodo sin conexión dejaba las marcas
+        // pendientes imposibles de subir hasta un re-login manual.
+        final refreshToken = responseData['refresh'] as String?;
         final userData = responseData['user'];
 
         if (token == null || userData == null) {
@@ -134,7 +139,13 @@ class _LoginScreenState extends State<LoginScreen> {
         final telefonoReal = userData['telefono'] ?? 'No registrado';
 
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('authToken', token);
+        // Guarda el `access` en prefs y el `refresh` en el almacén cifrado
+        // (Keystore/Keychain), para poder renovar la sesión en segundo plano
+        // antes de subir las marcas que quedaron en cola.
+        await AuthTokenProvider().saveTokens(
+          access: token,
+          refresh: refreshToken,
+        );
         await prefs.setString('user_nombre', nombreUsuario);
         await prefs.setString('user_area', areaUsuario);
         await prefs.setString('user_username', usuarioSistema);
