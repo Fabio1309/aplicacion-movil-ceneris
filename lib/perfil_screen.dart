@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'app_colors.dart';
+import 'config/api_config.dart';
 
 class PerfilScreen extends StatefulWidget {
   const PerfilScreen({super.key});
@@ -257,7 +258,7 @@ class _EditarEmailDialogState extends State<EditarEmailDialog> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('authToken') ?? '';
-      final Uri url = Uri.parse('https://ceneris-web-oror.onrender.com/api/actualizar-email/');
+      final Uri url = Uri.parse('${ApiConfig.baseUrl}/actualizar-email/');
       
       final response = await http.post(
         url,
@@ -345,7 +346,7 @@ class _EditarTelefonoDialogState extends State<EditarTelefonoDialog> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('authToken') ?? '';
-      final Uri url = Uri.parse('https://ceneris-web-oror.onrender.com/api/actualizar-telefono/');
+      final Uri url = Uri.parse('${ApiConfig.baseUrl}/actualizar-telefono/');
       
       final response = await http.post(
         url,
@@ -439,7 +440,7 @@ class _EditarNombreDialogState extends State<EditarNombreDialog> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('authToken') ?? '';
-      final Uri url = Uri.parse('https://ceneris-web-oror.onrender.com/api/actualizar-nombre/');
+      final Uri url = Uri.parse('${ApiConfig.baseUrl}/actualizar-nombre/');
       
       final response = await http.post(
         url,
@@ -536,7 +537,7 @@ class _CambiarPasswordDialogState extends State<CambiarPasswordDialog> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('authToken') ?? '';
-      final Uri url = Uri.parse('https://ceneris-web-oror.onrender.com/api/cambiar-password/');
+      final Uri url = Uri.parse('${ApiConfig.baseUrl}/cambiar-password/');
       
       final response = await http.post(
         url,

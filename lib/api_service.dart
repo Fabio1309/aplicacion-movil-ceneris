@@ -1,14 +1,13 @@
 // lib/api_service.dart
 
 import 'dart:convert';
-import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
+import 'config/api_config.dart';
 
 class ApiService {
-  // URL base de tu API en Render
-  final String _baseUrl = 'http://localhost:8000';
+  final String _baseUrl = ApiConfig.baseUrl;
 
   // --- 1. FUNCIÓN DE AYUDA PRIVADA ---
   // Obtiene el token y prepara los headers
@@ -35,7 +34,7 @@ class ApiService {
   }) async {
     try {
       final headers = await _getAuthHeaders();
-      final url = Uri.parse('$_baseUrl/api/horas-extra/solicitar/');
+      final url = Uri.parse('$_baseUrl/horas-extra/solicitar/');
 
       final body = json.encode({
         'fecha_horas_extra': DateFormat('yyyy-MM-dd').format(fecha),
@@ -62,7 +61,7 @@ class ApiService {
   Future<List<dynamic>> obtenerMisSolicitudesHE() async {
     try {
       final headers = await _getAuthHeaders();
-      final url = Uri.parse('$_baseUrl/api/horas-extra/mis-solicitudes/');
+      final url = Uri.parse('$_baseUrl/horas-extra/mis-solicitudes/');
 
       final response = await http.get(url, headers: headers);
 
@@ -84,7 +83,7 @@ class ApiService {
       final headers = await _getAuthHeaders();
       // Pasamos mes y año como Query Params
       final url =
-          Uri.parse('$_baseUrl/api/historial-asistencia/?mes=$mes&anio=$anio');
+          Uri.parse('$_baseUrl/historial-asistencia/?mes=$mes&anio=$anio');
 
       final response = await http.get(url, headers: headers);
 
@@ -108,7 +107,7 @@ class ApiService {
     try {
       final headers = await _getAuthHeaders();
       // Ajusta esta ruta si decidiste usar otra en urls.py
-      final url = Uri.parse('$_baseUrl/api/justificaciones/crear/');
+      final url = Uri.parse('$_baseUrl/justificaciones/crear/');
 
       final body = json.encode({
         'fecha': fecha, // Formato "YYYY-MM-DD"

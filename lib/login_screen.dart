@@ -1,14 +1,17 @@
 // lib/login_screen.dart (DISEÑO MEJORADO CON CAMPO DE CONTRASEÑA)
 
 import 'dart:convert';
-import 'dart:io' show Platform;
 import 'package:uuid/uuid.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:device_info_plus/device_info_plus.dart';
 import 'dashboard_screen.dart';
 import 'app_colors.dart';
+import 'config/api_config.dart';
+import 'services/secure_credential_store.dart';
+import 'services/offline_login_validator.dart';
+import 'services/user_sync_service.dart';
+import 'services/offline_login_event_queue.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -28,7 +31,7 @@ class _LoginScreenState extends State<LoginScreen> {
   // NUEVO: Estado para ocultar/mostrar la contraseña
   bool _isObscure = true; 
 
-  final String _apiUrl = 'http://localhost:8000/api';
+  final String _apiUrl = ApiConfig.baseUrl;
 
   @override
   void initState() {
@@ -98,7 +101,6 @@ class _LoginScreenState extends State<LoginScreen> {
       print('🚀 INICIANDO INTENTO DE LOGIN');
       print('🌐 URL a la que se apunta: $loginUri');
       print('👤 Usuario (DNI): "$dni"');
-      print('🔑 Contraseña real enviada: "$password"');
       print('📱 Device ID capturado: "$_deviceId"');
       print('======================================================\n');
       // ==========================================================
@@ -106,10 +108,13 @@ class _LoginScreenState extends State<LoginScreen> {
       final response = await http
           .post(
             loginUri,
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+              'Content-Type': 'application/json',
+              'Connection': 'close',
+            },
             body: requestBody,
           )
-          .timeout(const Duration(seconds: 20));
+          .timeout(const Duration(seconds: 45));
 
       if (response.statusCode == 200) {
         final responseData = json.decode(utf8.decode(response.bodyBytes));
@@ -136,6 +141,34 @@ class _LoginScreenState extends State<LoginScreen> {
         await prefs.setString('user_dni', dniReal);
         await prefs.setString('user_email', emailReal);
         await prefs.setString('user_telefono', telefonoReal);
+
+        // CAV-181: guardamos el hash cifrado de la credencial que acaba
+        // de validarse contra el backend, para poder re-verificarla
+        // localmente (por ejemplo, sin conexión) más adelante.
+        await SecureCredentialStore().saveCredentialHash(
+          username: dni,
+          password: password,
+        );
+
+        // CAV-83: recién obtuvimos un token válido; es el único momento en
+        // que se puede reportar a Django cualquier login offline que haya
+        // quedado pendiente de sincronizar en este dispositivo.
+        try {
+          await OfflineLoginEventQueue().flush(apiUrl: _apiUrl, token: token);
+        } catch (e) {
+          print('No se pudo sincronizar eventos de login offline: $e');
+        }
+
+        // CAV-82: refrescamos la lista de usuarios autorizados en todo
+        // login online exitoso (no solo al entrar a Marcar Asistencia),
+        // para que un trabajador que se va a zona sin señal quede con la
+        // ventana de 30 días vigente desde su último login, sin depender
+        // de que haya visitado esa pantalla primero.
+        try {
+          await UserSyncService(apiUrl: _apiUrl).sync(token: token);
+        } catch (e) {
+          print('No se pudo sincronizar usuarios autorizados: $e');
+        }
 
         _proceedToDashboard();
       } else {
@@ -170,11 +203,77 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       }
     } catch (e) {
-      _showError('Error de conexión. Verifique su internet.');
-      print("Error en login: $e");
+      print("Error en login online: $e");
+      // CAV-80: si el login contra el servidor no se pudo completar
+      // (por ejemplo, sin conexión), intentamos validar localmente
+      // contra las credenciales guardadas la última vez que este
+      // usuario entró bien en este mismo dispositivo.
+      await _attemptOfflineLogin(username: dni, password: password);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  /// CAV-81/82/83: intento de login sin conexión. Solo se llega aquí
+  /// cuando el login online (arriba) no pudo completarse.
+  Future<void> _attemptOfflineLogin({
+    required String username,
+    required String password,
+  }) async {
+    final validator = OfflineLoginValidator(
+      userSyncService: UserSyncService(apiUrl: _apiUrl),
+    );
+
+    final resultado = await validator.validar(
+      username: username,
+      password: password,
+    );
+
+    if (!resultado.success) {
+      _showError(resultado.mensajeParaUsuario);
+      return;
+    }
+
+    // CAV-83: dejamos registrado que este login fue offline, para
+    // reportárselo a Django apenas vuelva la conexión.
+    if (_deviceId != null) {
+      await OfflineLoginEventQueue().enqueue(
+        deviceId: _deviceId!,
+        fechaHoraOffline: DateTime.now(),
+      );
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Row(
+            children: [
+              Icon(Icons.wifi_off_rounded, color: Colors.white),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Sesión iniciada SIN CONEXIÓN',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.orange.shade800,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+      // Pausa para que el mensaje se alcance a ver antes de navegar
+      // (pushReplacement quita esta pantalla, y con ella cualquier
+      // SnackBar que estuviera mostrando).
+      await Future.delayed(const Duration(milliseconds: 1500));
+    }
+
+    _proceedToDashboard();
   }
 
   void _proceedToDashboard() {

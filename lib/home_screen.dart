@@ -14,6 +14,8 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'login_screen.dart';
 import 'dashboard_screen.dart';
 import 'app_colors.dart';
+import 'config/api_config.dart';
+import 'services/user_sync_service.dart';
 
 class HomeScreen extends StatefulWidget {
   final String dni;
@@ -51,7 +53,11 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _esTardanza = false;
   String _mensajeAviso = '';
 
-  final String _apiUrl = 'https://ceneris-web-oror.onrender.com/api';
+  // --- CAV-64: DÍA FERIADO ---
+  bool _esFeriado = false;
+  String _nombreFeriado = '';
+
+  final String _apiUrl = ApiConfig.baseUrl;
 
   @override
   void initState() {
@@ -131,7 +137,7 @@ class _HomeScreenState extends State<HomeScreen> {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token'
         },
-      ).timeout(const Duration(seconds: 15));
+      ).timeout(const Duration(seconds: 45));
 
       if (response.statusCode == 200) {
         final data = json.decode(utf8.decode(response.bodyBytes));
@@ -142,6 +148,23 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (e) {
       _loadCachedConfig(prefs);
+    }
+
+    // CAV-182 (cliente): sincroniza en segundo plano la lista de usuarios
+    // autorizados. No debe bloquear ni romper la carga del dashboard si
+    // falla (por ejemplo, sin conexión): solo se registra el error.
+    unawaited(_syncAuthorizedUsers(token));
+  }
+
+  Future<void> _syncAuthorizedUsers(String token) async {
+    try {
+      final syncService = UserSyncService(apiUrl: _apiUrl);
+      await syncService.sync(token: token);
+    } catch (e) {
+      // Sincronización silenciosa: si falla (sin conexión, checksum
+      // inválido, etc.) simplemente se reintentará la próxima vez que
+      // se abra esta pantalla, sin afectar el resto de la app.
+      debugPrint('CAV-182: no se pudo sincronizar usuarios autorizados: $e');
     }
   }
 
@@ -158,6 +181,13 @@ class _HomeScreenState extends State<HomeScreen> {
     final String? hSalida = data['horario_salida'];
     final esTarde = data['es_tardanza'] ?? false;
     final aviso = data['mensaje_aviso'] ?? '';
+
+    // CAV-64: El backend marca si el día es feriado. Aceptamos varias claves
+    // por compatibilidad con la respuesta del API (es_feriado / nombre_feriado).
+    final bool esFeriado = data['es_feriado'] ?? false;
+    final String nombreFeriado =
+        (data['nombre_feriado'] ?? data['mensaje_feriado'] ?? 'Día Feriado')
+            .toString();
 
     final newStatusMessage = newLastMarkingType == 'Entrada'
         ? '✅ DENTRO. Jornada en curso.'
@@ -177,6 +207,9 @@ class _HomeScreenState extends State<HomeScreen> {
         _horaSalida = hSalida ?? '--:--';
         _esTardanza = esTarde;
         _mensajeAviso = aviso;
+
+        _esFeriado = esFeriado;
+        _nombreFeriado = nombreFeriado;
       });
     }
   }
@@ -428,6 +461,12 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 24),
 
+              // CAV-64: BANNER DE DÍA FERIADO
+              if (_esFeriado) ...[
+                _buildBannerFeriado(),
+                const SizedBox(height: 16),
+              ],
+
               // 2. SECCIÓN DINÁMICA: ¿HAY TURNO?
               if (_showScheduleCard) ...[
                 if (_esPorHoras)
@@ -527,6 +566,69 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  // --- CAV-64: BANNER DE DÍA FERIADO ---
+  Widget _buildBannerFeriado() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Colors.purple.shade500, Colors.deepPurple.shade400],
+        ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.deepPurple.withOpacity(0.25),
+            blurRadius: 12,
+            offset: const Offset(0, 5),
+          )
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.celebration_rounded,
+                color: Colors.white, size: 26),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'DÍA FERIADO',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  _nombreFeriado,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    height: 1.2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

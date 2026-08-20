@@ -4,7 +4,7 @@ import 'package:hive/hive.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
-import 'app_colors.dart'; // Asegúrate de tener tus colores aquí
+import 'config/api_config.dart';
 
 class HistorialMarcacionesScreen extends StatefulWidget {
   const HistorialMarcacionesScreen({super.key});
@@ -18,7 +18,7 @@ class _HistorialMarcacionesScreenState
     extends State<HistorialMarcacionesScreen> {
   bool _isLoading = true;
   List<Map<String, dynamic>> _marcaciones = [];
-  final String _baseUrl = 'https://ceneris-web-oror.onrender.com/api';
+  final String _baseUrl = ApiConfig.baseUrl;
 
   @override
   void initState() {
