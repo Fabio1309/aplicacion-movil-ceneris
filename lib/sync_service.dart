@@ -89,7 +89,18 @@ class SyncService {
 
   /// Tras este número de rechazos definitivos, el registro se aparta a
   /// [rejectedBoxName] para revisión manual en vez de bloquear la cola.
-  static const maxRejectionAttempts = 5;
+  ///
+  /// El número es alto a propósito: en faena minera un trabajador puede pasar
+  /// meses sin señal, así que la cola llega con cientos o miles de marcas y un
+  /// rechazo sistemático (un cambio de validación en el servidor, un turno que
+  /// RRHH aún no cargó) apartaría de golpe meses de planilla. Conviene
+  /// insistir mucho antes de dar una marca por irrecuperable.
+  static const maxRejectionAttempts = 20;
+
+  /// Si el envío falla por red este número de veces SEGUIDAS, se corta el
+  /// ciclo. Con una cola de meses, seguir intentando registro por registro
+  /// tras una caída de conexión son horas de timeouts inútiles.
+  static const _maxConsecutiveNetworkFailures = 3;
 
   static const _maxBackoffCycles = 6;
 
@@ -114,8 +125,14 @@ class SyncService {
   Timer? _heartbeatTimer;
   StreamSubscription<void>? _connectivitySubscription;
 
-  /// Cantidad de marcas pendientes, para que la UI pueda mostrarlo.
+  /// Cantidad de marcas pendientes, para que la UI pueda mostrarlo. Se
+  /// actualiza registro a registro: vaciar una cola de meses puede tardar
+  /// mucho y el trabajador necesita ver que está avanzando.
   final ValueNotifier<int> pendingCount = ValueNotifier<int>(0);
+
+  /// Marcas apartadas que ningún reintento va a recuperar. No se borran
+  /// nunca: son planilla y alguien tiene que revisarlas a mano.
+  final ValueNotifier<int> rejectedCount = ValueNotifier<int>(0);
 
   /// `true` cuando la sesión caducó y el refresh tampoco funcionó: la cola
   /// queda intacta, pero hace falta que el usuario vuelva a iniciar sesión.
@@ -216,6 +233,7 @@ class SyncService {
     var token = tokenGuardado;
     var yaSeRefresco = false;
     var outcome = _CycleOutcome.completed;
+    var fallosDeRedSeguidos = 0;
 
     for (final key in _pendingBox.keys.toList()) {
       final raw = _pendingBox.get(key);
@@ -244,15 +262,31 @@ class SyncService {
         case _SendStatus.accepted:
         case _SendStatus.duplicate:
           await _pendingBox.delete(key);
+          fallosDeRedSeguidos = 0;
           break;
         case _SendStatus.unauthorized:
           return _CycleOutcome.authExpired;
         case _SendStatus.rejected:
           await _registrarRechazo(key, record, result.detail);
+          fallosDeRedSeguidos = 0;
           break;
         case _SendStatus.retryable:
           outcome = _CycleOutcome.retryable;
+          fallosDeRedSeguidos++;
           break;
+      }
+
+      // La UI necesita ver el avance mientras se vacía una cola larga.
+      _refreshPendingCount();
+
+      if (fallosDeRedSeguidos >= _maxConsecutiveNetworkFailures) {
+        // La conexión se cayó a mitad del vaciado. Insistir con los cientos
+        // de registros que faltan solo encadenaría timeouts durante horas:
+        // se corta y se espera al backoff o al próximo evento de red. Lo ya
+        // enviado quedó borrado de la cola, así que no se repite trabajo.
+        debugPrint('SyncService: conexión perdida durante el vaciado. '
+            'Quedan ${_pendingBox.length} marcas para el próximo ciclo.');
+        return _CycleOutcome.retryable;
       }
     }
 
@@ -389,8 +423,12 @@ class SyncService {
   }
 
   void _refreshPendingCount() {
-    if (!Hive.isBoxOpen(pendingBoxName)) return;
-    pendingCount.value = _pendingBox.length;
+    if (Hive.isBoxOpen(pendingBoxName)) {
+      pendingCount.value = _pendingBox.length;
+    }
+    if (Hive.isBoxOpen(rejectedBoxName)) {
+      rejectedCount.value = _rejectedBox.length;
+    }
   }
 
   /// CAV-83: al volver la conexión, reporta a Django los logins offline

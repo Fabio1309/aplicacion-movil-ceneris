@@ -241,6 +241,47 @@ void main() {
       expect(pendingBox.length, 1);
     });
 
+    test('si la conexion se cae a mitad del vaciado, corta el ciclo en vez de '
+        'encadenar timeouts', () async {
+      // Escenario de faena: meses sin señal dejan cientos de marcas en cola.
+      // Si la conexion se corta al empezar a subirlas, insistir registro por
+      // registro serian horas de timeouts inutiles.
+      var peticiones = 0;
+      final client = MockClient((_) async {
+        peticiones++;
+        throw const SocketException('conexion perdida');
+      });
+
+      for (var i = 0; i < 40; i++) {
+        await pendingBox.add(_marcaOffline());
+      }
+
+      await buildService(attendanceClient: client).syncPendingAttendances();
+
+      expect(peticiones, 3);
+      expect(pendingBox.length, 40, reason: 'no se pierde ninguna marca');
+    });
+
+    test('una cola larga se vacia entera y va informando el avance', () async {
+      final client = MockClient((_) async => http.Response('{"id":1}', 201));
+
+      for (var i = 0; i < 250; i++) {
+        await pendingBox.add(_marcaOffline());
+      }
+
+      final service = buildService(attendanceClient: client);
+      final avances = <int>[];
+      service.pendingCount.addListener(() => avances.add(service.pendingCount.value));
+
+      await service.syncPendingAttendances();
+
+      expect(pendingBox.isEmpty, isTrue);
+      // El contador no puede quedarse congelado hasta el final: el trabajador
+      // necesita ver que la cola esta bajando.
+      expect(avances.length, greaterThan(100));
+      expect(service.pendingCount.value, 0);
+    });
+
     test('un 409 (ya registrada) limpia la cola en vez de reintentar siempre',
         () async {
       var llamadas = 0;
