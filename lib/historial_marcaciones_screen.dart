@@ -4,7 +4,6 @@ import 'package:hive/hive.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
-import 'app_colors.dart'; // Asegúrate de tener tus colores aquí
 import 'config/api_config.dart';
 
 class HistorialMarcacionesScreen extends StatefulWidget {

@@ -1,12 +1,10 @@
 // lib/login_screen.dart (DISEÑO MEJORADO CON CAMPO DE CONTRASEÑA)
 
 import 'dart:convert';
-import 'dart:io' show Platform;
 import 'package:uuid/uuid.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:device_info_plus/device_info_plus.dart';
 import 'dashboard_screen.dart';
 import 'app_colors.dart';
 import 'config/api_config.dart';
@@ -103,7 +101,6 @@ class _LoginScreenState extends State<LoginScreen> {
       print('🚀 INICIANDO INTENTO DE LOGIN');
       print('🌐 URL a la que se apunta: $loginUri');
       print('👤 Usuario (DNI): "$dni"');
-      print('🔑 Contraseña real enviada: "$password"');
       print('📱 Device ID capturado: "$_deviceId"');
       print('======================================================\n');
       // ==========================================================
