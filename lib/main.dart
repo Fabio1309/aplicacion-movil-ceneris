@@ -31,7 +31,7 @@ Future<void> main() async {
   await Hive.openBox('eventos_login_offline'); // CAV-83
 
   // 3. Inicia el servicio de sincronización en segundo plano
-  SyncService().startListening();
+  SyncService.instance.startListening();
 
   // 4. Lógica de sesión con SharedPreferences
   final prefs = await SharedPreferences.getInstance();

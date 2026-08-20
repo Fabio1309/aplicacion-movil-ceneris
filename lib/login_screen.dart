@@ -8,7 +8,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dashboard_screen.dart';
 import 'app_colors.dart';
 import 'config/api_config.dart';
+import 'sync_service.dart';
 import 'services/secure_credential_store.dart';
+import 'services/trusted_clock.dart';
 import 'services/offline_login_validator.dart';
 import 'services/user_sync_service.dart';
 import 'services/offline_login_event_queue.dart';
@@ -116,6 +118,13 @@ class _LoginScreenState extends State<LoginScreen> {
           )
           .timeout(const Duration(seconds: 45));
 
+      // Antifraude de reloj: el login es el primer (y a veces el único)
+      // contacto con el servidor, así que es la mejor oportunidad para
+      // anclar la hora real antes de que el trabajador salga a zona sin
+      // señal. Se ancla incluso si las credenciales fallan: la hora del
+      // servidor es igual de válida.
+      await TrustedClock.instance.anclarConRespuesta(response);
+
       if (response.statusCode == 200) {
         final responseData = json.decode(utf8.decode(response.bodyBytes));
         final token = responseData['access'];
@@ -157,6 +166,26 @@ class _LoginScreenState extends State<LoginScreen> {
           await OfflineLoginEventQueue().flush(apiUrl: _apiUrl, token: token);
         } catch (e) {
           print('No se pudo sincronizar eventos de login offline: $e');
+        }
+
+        // CAV-83: mismo razonamiento para las marcaciones guardadas sin
+        // conexión. Si la sesión anterior se abrió en modo offline nunca
+        // hubo token, y si el token viejo venció el backend respondía
+        // 401: en ambos casos las asistencias quedaron esperando. Este
+        // es el primer momento en que hay un token fresco para subirlas.
+        final resultadoAsistencias =
+            await SyncService.instance.syncPendingAttendances();
+        if (resultadoAsistencias.enviadas > 0 && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '✅ Se sincronizaron ${resultadoAsistencias.enviadas} '
+                'marcación(es) que estaban guardadas sin conexión.',
+              ),
+              backgroundColor: Colors.green.shade700,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
         }
 
         // CAV-82: refrescamos la lista de usuarios autorizados en todo
@@ -237,9 +266,12 @@ class _LoginScreenState extends State<LoginScreen> {
     // CAV-83: dejamos registrado que este login fue offline, para
     // reportárselo a Django apenas vuelva la conexión.
     if (_deviceId != null) {
+      // La hora del evento también sale del reloj confiable, no del
+      // reloj del celular (que puede estar corrido).
+      final hora = await TrustedClock.instance.ahora();
       await OfflineLoginEventQueue().enqueue(
         deviceId: _deviceId!,
-        fechaHoraOffline: DateTime.now(),
+        fechaHoraOffline: hora.local,
       );
     }
 

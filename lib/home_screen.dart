@@ -7,15 +7,38 @@ import 'package:http/http.dart' as http;
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geodesy/geodesy.dart';
-import 'package:hive/hive.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:intl/intl.dart';
 
 // --- TUS IMPORTACIONES ---
 import 'login_screen.dart';
 import 'dashboard_screen.dart';
 import 'app_colors.dart';
 import 'config/api_config.dart';
+import 'sync_service.dart';
+import 'services/pending_attendance_queue.dart';
+import 'services/trusted_clock.dart';
 import 'services/user_sync_service.dart';
+
+/// Resultado de validar la ubicación del trabajador contra las zonas
+/// permitidas.
+class _ResultadoZona {
+  const _ResultadoZona({
+    required this.dentro,
+    required this.nombre,
+    this.verificada = true,
+  });
+
+  const _ResultadoZona.dentroDe(String nombre)
+      : this(dentro: true, nombre: nombre);
+
+  final bool dentro;
+  final String nombre;
+
+  /// `false` cuando no se pudo comprobar la geocerca (equipo sin zonas
+  /// cacheadas): la marcación se acepta, pero queda señalada.
+  final bool verificada;
+}
 
 class HomeScreen extends StatefulWidget {
   final String dni;
@@ -82,6 +105,11 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _initializeScreen() async {
     await _getDeviceId();
     await _fetchInitialDataFromBackend();
+    // CAV-83: intento al entrar a la pantalla. `onConnectivityChanged`
+    // solo avisa cuando la conexión CAMBIA, así que si el trabajador
+    // abre la app ya con señal (caso típico: volvió a zona con
+    // cobertura y recién ahí abre la app) el listener nunca dispara.
+    await _syncPendingAttendances();
     if (mounted) setState(() => _isLoading = false);
   }
 
@@ -94,32 +122,53 @@ class _HomeScreenState extends State<HomeScreen> {
     print('📱 ID recuperado en la pantalla Home: $_deviceId');
   }
 
+  /// CAV-83: delega en el único [SyncService] de la app. Antes esta
+  /// pantalla tenía su propia copia del envío, que borraba el registro
+  /// de Hive SIN mirar la respuesta del servidor: si el token estaba
+  /// vencido (o la sesión se había abierto offline, que nunca guarda
+  /// token) el backend respondía 401 y la marcación se perdía igual.
   Future<void> _syncPendingAttendances() async {
-    var box = Hive.box('asistencias_pendientes');
-    if (box.isEmpty) return;
-    final connectivityResult = await Connectivity().checkConnectivity();
-    if (connectivityResult.contains(ConnectivityResult.none)) return;
+    final resultado = await SyncService.instance.syncPendingAttendances();
+    if (!mounted) return;
 
-    final Map<dynamic, dynamic> rawMap = box.toMap();
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('authToken');
-
-    for (var key in rawMap.keys) {
-      final data = rawMap[key];
-      try {
-        await http.post(
-          Uri.parse('$_apiUrl/asistencias/registrar/'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $token'
-          },
-          body: json.encode(data),
+    switch (resultado.estado) {
+      case PendingAttendanceSyncStatus.completado:
+        if (resultado.enviadas > 0) {
+          _mostrarAviso(
+            '✅ ${resultado.enviadas} marcación(es) offline sincronizada(s).',
+            Colors.green.shade700,
+          );
+          await _fetchInitialDataFromBackend();
+        }
+        if (resultado.rechazadas > 0) {
+          _mostrarAviso(
+            '⚠️ ${resultado.rechazadas} marcación(es) fueron rechazadas por el '
+            'servidor. Avisa a RR.HH.',
+            Colors.orange.shade800,
+          );
+        }
+      case PendingAttendanceSyncStatus.sinAutorizacion:
+        _mostrarAviso(
+          '⚠️ Tienes ${resultado.pendientes} marcación(es) sin subir. Vuelve a '
+          'iniciar sesión con internet para enviarlas.',
+          Colors.orange.shade800,
         );
-        await box.delete(key);
-      } catch (e) {
+      case PendingAttendanceSyncStatus.errorRed:
+      case PendingAttendanceSyncStatus.sinPendientes:
         break;
-      }
     }
+  }
+
+  void _mostrarAviso(String mensaje, Color color) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(mensaje),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 4),
+      ),
+    );
   }
 
   Future<void> _fetchInitialDataFromBackend() async {
@@ -138,6 +187,11 @@ class _HomeScreenState extends State<HomeScreen> {
           'Authorization': 'Bearer $token'
         },
       ).timeout(const Duration(seconds: 45));
+
+      // Antifraude de reloj: cada respuesta del servidor trae su hora en
+      // la cabecera `Date`. Se guarda como ancla para poder calcular la
+      // hora real después, sin conexión y sin confiar en el celular.
+      await TrustedClock.instance.anclarConRespuesta(response);
 
       if (response.statusCode == 200) {
         final data = json.decode(utf8.decode(response.bodyBytes));
@@ -252,16 +306,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
         // Si hay internet, le avisamos a Django inmediatamente
         if (hasInternet) {
+          final horaFraude = await TrustedClock.instance.ahora();
           final fraudData = {
             'tipo_marcacion': markingType,
             'latitud': pos.latitude,
             'longitud': pos.longitude,
             'device_id': _deviceId,
             'nombre_ubicacion': 'Fake GPS',
-            'timestamp': DateTime.now().toIso8601String(),
+            'timestamp': horaFraude.local.toIso8601String(),
             // ---> ESTAS DOS LÍNEAS ACTIVAN LA ALARMA EN DJANGO <---
-            'is_fraud': true, 
+            'is_fraud': true,
             'reason': 'Uso de Fake GPS / Ubicación simulada',
+            ...horaFraude.comoEvidencia(),
           };
           
           // Enviamos el fraude usando tu misma función
@@ -273,66 +329,50 @@ class _HomeScreenState extends State<HomeScreen> {
       // ==============================================================
 
       if (mounted) setState(() => _statusMessage = 'Validando zona...');
-      bool isAllowed = false;
-      String locName = "Desconocida";
 
-      if (!hasInternet) {
-        isAllowed = true;
-        locName = "Offline";
-      } else {
-        final LatLng userLoc = LatLng(pos.latitude, pos.longitude);
-        final Geodesy geodesy = Geodesy();
-
-        for (var loc in _allowedLocations) {
-          if (loc['limites'] != null && (loc['limites'] as List).isNotEmpty) {
-            final List<LatLng> poly = (loc['limites'] as List)
-                .map<LatLng>((p) => LatLng(
-                    (p['lat'] as num).toDouble(), (p['lng'] as num).toDouble()))
-                .toList();
-            if (poly.length >= 3 &&
-                geodesy.isGeoPointInPolygon(userLoc, poly)) {
-              isAllowed = true;
-              locName = loc['nombre'];
-              break;
-            }
-          } else if (loc['latitud'] != null && loc['longitud'] != null) {
-            final double dist = Geolocator.distanceBetween(
-                (loc['latitud'] as num).toDouble(),
-                (loc['longitud'] as num).toDouble(),
-                pos.latitude,
-                pos.longitude);
-            if (dist <= (loc['radio'] as num? ?? 50.0).toDouble()) {
-              isAllowed = true;
-              locName = loc['nombre'];
-              break;
-            }
-          }
-        }
-      }
+      // La MISMA validación de geocerca con y sin conexión. Antes, sin
+      // internet se aceptaba cualquier ubicación a ciegas ("Offline"),
+      // así que bastaba con poner el celular en modo avión para marcar
+      // desde la casa. Las zonas permitidas ya están cacheadas en
+      // `cached_config`, así que se pueden verificar igual sin señal.
+      final zona = _verificarZona(pos);
 
       // ==============================================================
       // --- 2. MARCAR ASISTENCIA NORMAL ---
       // ==============================================================
-      if (isAllowed) {
+      if (zona.dentro) {
+        // 🕒 ESCUDO ANTI-FRAUDE DE RELOJ: la hora NO sale del reloj del
+        // celular, sino de la hora del servidor proyectada con el reloj
+        // monotónico del equipo (ver TrustedClock). Si el trabajador
+        // atrasa la hora del celular para "llegar temprano", igual se
+        // registra la hora real y viaja la evidencia del desfase.
+        final hora = await TrustedClock.instance.ahora(horaGps: pos.timestamp);
+
         final data = {
           'tipo_marcacion': markingType,
           'latitud': pos.latitude,
           'longitud': pos.longitude,
           'device_id': _deviceId,
-          'nombre_ubicacion': locName,
-          'timestamp': DateTime.now().toIso8601String(),
+          'nombre_ubicacion': zona.nombre,
+          'timestamp': hora.local.toIso8601String(),
+          'registrado_offline': !hasInternet,
+          'ubicacion_verificada': zona.verificada,
+          ...hora.comoEvidencia(),
         };
 
         if (hasInternet) {
           await _postAttendanceToBackend(data);
         } else {
-          await Hive.box('asistencias_pendientes').add(data);
-          if (mounted)
+          await PendingAttendanceQueue().enqueue(data);
+          if (mounted) {
             setState(() {
               _lastMarkingType = markingType;
               _statusMessage = '✅ Guardado Offline.';
             });
+          }
         }
+
+        _avisarSiElRelojEstaAlterado(hora);
       } else {
         if (mounted) setState(() => _statusMessage = '❌ Estás fuera del área.');
       }
@@ -341,6 +381,61 @@ class _HomeScreenState extends State<HomeScreen> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  /// Verifica si [pos] cae dentro de alguna zona permitida. Usa
+  /// `_allowedLocations`, que se llena desde el backend o desde
+  /// `cached_config` cuando no hay señal, así que funciona igual online
+  /// y offline.
+  _ResultadoZona _verificarZona(Position pos) {
+    final LatLng userLoc = LatLng(pos.latitude, pos.longitude);
+    final Geodesy geodesy = Geodesy();
+
+    for (var loc in _allowedLocations) {
+      if (loc['limites'] != null && (loc['limites'] as List).isNotEmpty) {
+        final List<LatLng> poly = (loc['limites'] as List)
+            .map<LatLng>((p) => LatLng(
+                (p['lat'] as num).toDouble(), (p['lng'] as num).toDouble()))
+            .toList();
+        if (poly.length >= 3 && geodesy.isGeoPointInPolygon(userLoc, poly)) {
+          return _ResultadoZona.dentroDe(loc['nombre']);
+        }
+      } else if (loc['latitud'] != null && loc['longitud'] != null) {
+        final double dist = Geolocator.distanceBetween(
+            (loc['latitud'] as num).toDouble(),
+            (loc['longitud'] as num).toDouble(),
+            pos.latitude,
+            pos.longitude);
+        if (dist <= (loc['radio'] as num? ?? 50.0).toDouble()) {
+          return _ResultadoZona.dentroDe(loc['nombre']);
+        }
+      }
+    }
+
+    // Sin zonas cacheadas no hay contra qué validar (equipo nuevo que
+    // nunca se conectó). No se le bloquea la marcación al trabajador,
+    // pero se registra sin verificar para que el backend la revise.
+    if (_allowedLocations.isEmpty) {
+      return const _ResultadoZona(
+        dentro: true,
+        nombre: 'Sin verificar (sin zonas cacheadas)',
+        verificada: false,
+      );
+    }
+
+    return const _ResultadoZona(dentro: false, nombre: 'Fuera de zona');
+  }
+
+  /// Le avisa al trabajador que su reloj está corrido, para que no se
+  /// sorprenda de que la marcación quedó con otra hora.
+  void _avisarSiElRelojEstaAlterado(HoraConfiable hora) {
+    if (!hora.relojManipulado) return;
+    final minutos = hora.desfaseReloj.inMinutes.abs();
+    _mostrarAviso(
+      '⏰ La hora de tu celular está desfasada $minutos min. La marcación se '
+      'registró con la hora real: ${DateFormat('HH:mm').format(hora.local)}.',
+      Colors.orange.shade800,
+    );
   }
 
   Future<void> _postAttendanceToBackend(Map<String, dynamic> data) async {
@@ -355,6 +450,8 @@ class _HomeScreenState extends State<HomeScreen> {
         },
         body: json.encode(data),
       );
+
+      await TrustedClock.instance.anclarConRespuesta(response);
 
       if (response.statusCode == 201) {
         if (mounted) {

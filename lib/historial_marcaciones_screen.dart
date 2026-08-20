@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:hive/hive.dart';
+import 'services/pending_attendance_queue.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
@@ -31,15 +31,16 @@ class _HistorialMarcacionesScreenState
     List<Map<String, dynamic>> listaCombinada = [];
 
     // 1. CARGAR LOCALES (OFFLINE / PENDIENTES)
-    // Leemos de Hive lo que aún no se ha subido
-    var box = Hive.box('asistencias_pendientes');
-    for (var key in box.keys) {
-      final data = box.get(key);
+    // Leemos de la cola lo que aún no se ha subido
+    for (final data in PendingAttendanceQueue().pendientes) {
       listaCombinada.add({
         'tipo': data['tipo_marcacion'],
         'fecha_hora': data['timestamp'], // Viene en ISO String
         'ubicacion': data['nombre_ubicacion'] ?? 'Ubicación Desconocida',
         'es_offline': true, // BANDERA IMPORTANTE
+        // Si el servidor rechazó esta marcación, el motivo viaja aquí
+        // para poder mostrarlo en vez de dejarla como "pendiente" eterna.
+        'error_sync': data['_ultimo_error'],
       });
     }
 
@@ -116,6 +117,12 @@ class _HistorialMarcacionesScreenState
   Widget _buildMarcacionCard(Map<String, dynamic> item) {
     final bool esOffline = item['es_offline'];
     final bool esEntrada = item['tipo'] == 'Entrada';
+    // El servidor rechazó esta marcación: sigue guardada localmente,
+    // pero no está simplemente "esperando señal".
+    final bool fueRechazada = item['error_sync'] != null;
+    final Color colorEstado = fueRechazada
+        ? Colors.red
+        : (esOffline ? Colors.orange : Colors.blue);
 
     // Formatear fecha bonita
     final DateTime fecha = DateTime.parse(item['fecha_hora']);
@@ -192,17 +199,23 @@ class _HistorialMarcacionesScreenState
           Column(
             children: [
               Icon(
-                esOffline ? Icons.cloud_off_rounded : Icons.cloud_done_rounded,
-                color: esOffline ? Colors.orange : Colors.blue,
+                fueRechazada
+                    ? Icons.error_outline_rounded
+                    : (esOffline
+                        ? Icons.cloud_off_rounded
+                        : Icons.cloud_done_rounded),
+                color: colorEstado,
                 size: 22,
               ),
               const SizedBox(height: 4),
               Text(
-                esOffline ? "Pendiente" : "Enviado",
+                fueRechazada
+                    ? "Rechazada"
+                    : (esOffline ? "Pendiente" : "Enviado"),
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.bold,
-                  color: esOffline ? Colors.orange : Colors.blue,
+                  color: colorEstado,
                 ),
               )
             ],

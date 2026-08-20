@@ -1,40 +1,77 @@
+import 'dart:async';
+
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:hive/hive.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:geolocator/geolocator.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'config/api_config.dart';
 import 'services/offline_login_event_queue.dart';
+import 'services/pending_attendance_queue.dart';
 
+/// Orquestador unico de todo lo que quedo pendiente de subir mientras el
+/// trabajador estuvo sin señal: marcaciones de asistencia (CAV-83) y
+/// eventos de login offline (CAV-81/82/83).
+///
+/// Se usa siempre a traves de [SyncService.instance]: el candado
+/// `_isSyncing` solo sirve si toda la app comparte la misma instancia.
 class SyncService {
-  SyncService({String? apiUrl, OfflineLoginEventQueue? offlineLoginQueue})
-      : _apiUrl = apiUrl ?? ApiConfig.baseUrl,
-        _offlineLoginQueue = offlineLoginQueue ?? OfflineLoginEventQueue();
+  SyncService({
+    String? apiUrl,
+    OfflineLoginEventQueue? offlineLoginQueue,
+    PendingAttendanceQueue? attendanceQueue,
+  })  : _apiUrl = apiUrl ?? ApiConfig.baseUrl,
+        _offlineLoginQueue = offlineLoginQueue ?? OfflineLoginEventQueue(),
+        _attendanceQueue = attendanceQueue ?? PendingAttendanceQueue();
 
-  final Box _pendingBox = Hive.box('asistencias_pendientes');
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  /// Instancia compartida por toda la app (main, login, home).
+  static final SyncService instance = SyncService();
+
   final String _apiUrl;
   final OfflineLoginEventQueue _offlineLoginQueue;
+  final PendingAttendanceQueue _attendanceQueue;
+
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   bool _isSyncing = false;
 
-  void startListening() {
-    print("SyncService: Iniciando y escuchando cambios de conexión...");
-    syncPendingAttendances();
-    syncPendingOfflineLoginEvents();
+  int get pendientes => _attendanceQueue.cantidadPendientes;
 
-    Connectivity().onConnectivityChanged.listen((results) {
-      if (results.contains(ConnectivityResult.mobile) ||
-          results.contains(ConnectivityResult.wifi)) {
-        print(
-          'SyncService: Conexión a internet detectada. Intentando sincronizar...',
-        );
-        syncPendingAttendances();
-        syncPendingOfflineLoginEvents();
+  void startListening() {
+    debugPrint('SyncService: Iniciando y escuchando cambios de conexión...');
+
+    // Intento al arrancar la app: `onConnectivityChanged` solo emite
+    // cuando la conexión CAMBIA, asi que si el celular ya arranca con
+    // señal nunca llegaria a dispararse por si solo.
+    sincronizarTodo();
+
+    _connectivitySubscription?.cancel();
+    _connectivitySubscription =
+        Connectivity().onConnectivityChanged.listen((results) {
+      if (_hayRed(results)) {
+        debugPrint('SyncService: Conexión detectada. Intentando sincronizar...');
+        sincronizarTodo();
       } else {
-        print('SyncService: Sin conexión a internet.');
+        debugPrint('SyncService: Sin conexión a internet.');
       }
     });
+  }
+
+  Future<void> dispose() async {
+    await _connectivitySubscription?.cancel();
+    _connectivitySubscription = null;
+  }
+
+  static bool _hayRed(List<ConnectivityResult> results) {
+    return results.any((r) => r != ConnectivityResult.none);
+  }
+
+  /// Vacia las dos colas pendientes. Nunca lanza.
+  ///
+  /// Devuelve el resultado de las asistencias, que es lo que la UI
+  /// necesita para avisarle algo al trabajador.
+  Future<PendingAttendanceSyncResult> sincronizarTodo() async {
+    final resultado = await syncPendingAttendances();
+    await syncPendingOfflineLoginEvents();
+    return resultado;
   }
 
   /// CAV-83: al volver la conexión, reporta a Django los logins offline
@@ -42,123 +79,89 @@ class SyncService {
   Future<void> syncPendingOfflineLoginEvents() async {
     if (!_offlineLoginQueue.hayPendientes) return;
 
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('authToken');
+    final token = await _leerToken();
     if (token == null) return; // Sin sesión válida, no hay con qué reportar.
 
     try {
       await _offlineLoginQueue.flush(apiUrl: _apiUrl, token: token);
-      print('SyncService: Eventos de login offline sincronizados.');
+      debugPrint('SyncService: Eventos de login offline sincronizados.');
     } catch (e) {
-      print('SyncService: No se pudo sincronizar login offline: $e');
+      debugPrint('SyncService: No se pudo sincronizar login offline: $e');
     }
   }
 
-  Future<void> syncPendingAttendances() async {
+  /// Sube a Django las marcaciones guardadas sin conexión.
+  ///
+  /// El candado `_isSyncing` se libera SIEMPRE (try/finally). Antes, si
+  /// algo fallaba a media sincronización el candado quedaba trabado en
+  /// `true` para toda la vida del proceso y ninguna asistencia volvia a
+  /// sincronizarse hasta reinstalar la app: ese era el bug reportado.
+  Future<PendingAttendanceSyncResult> syncPendingAttendances() async {
     if (_isSyncing) {
-      print('SyncService: Sincronización ya en progreso. Omitiendo.');
-      return;
+      debugPrint('SyncService: Sincronización ya en progreso. Omitiendo.');
+      return PendingAttendanceSyncResult(
+        estado: PendingAttendanceSyncStatus.completado,
+        pendientes: _attendanceQueue.cantidadPendientes,
+      );
     }
-    if (_pendingBox.isEmpty) {
-      print('SyncService: No hay asistencias pendientes para sincronizar.');
-      return;
+
+    if (!_attendanceQueue.hayPendientes) {
+      return const PendingAttendanceSyncResult(
+        estado: PendingAttendanceSyncStatus.sinPendientes,
+      );
     }
 
     _isSyncing = true;
-    print(
-      'SyncService: Se encontraron ${_pendingBox.length} asistencias pendientes. Bloqueando nuevas sincronizaciones.',
-    );
-
-    // 1. OBTENEMOS LAS UBICACIONES PERMITIDAS DESDE FIRESTORE
-    List<Map<String, dynamic>> allowedLocations = [];
     try {
-      final querySnapshot = await _firestore.collection('ubicaciones').get();
-      allowedLocations = querySnapshot.docs.map((doc) => doc.data()).toList();
-      print(
-        "SyncService: Ubicaciones para validación cargadas: ${allowedLocations.length}",
+      debugPrint(
+        'SyncService: ${_attendanceQueue.cantidadPendientes} asistencias '
+        'pendientes. Enviando a Django...',
       );
-    } catch (e) {
-      print(
-        "SyncService: Error crítico al cargar ubicaciones. Se cancela la sincronización. $e",
+
+      final token = await _leerToken();
+      final resultado = await _attendanceQueue.flush(
+        apiUrl: _apiUrl,
+        token: token,
       );
-      _isSyncing = false;
-      return;
-    }
 
-    final successfullyProcessedKeys = [];
-    final keysToSync = _pendingBox.keys.toList();
-
-    for (var key in keysToSync) {
-      final attendanceData = Map<String, dynamic>.from(_pendingBox.get(key));
-      final String createdAtString = attendanceData['createdAt'];
-      final DateTime createdAtDate = DateTime.parse(createdAtString);
-
-      try {
-        // 2. VALIDAMOS LA UBICACIÓN DEL REGISTRO PENDIENTE
-        bool isWithinAllowedLocation = false;
-        String locationName = "Ubicación no verificada (sin conexión)";
-
-        for (var location in allowedLocations) {
-          final double lat = (location['latitud'] as num).toDouble();
-          final double lon = (location['longitud'] as num).toDouble();
-          final double rad = (location['radio'] as num? ?? 30.0).toDouble();
-          double distance = Geolocator.distanceBetween(
-            lat,
-            lon,
-            attendanceData['latitude'],
-            attendanceData['longitude'],
+      switch (resultado.estado) {
+        case PendingAttendanceSyncStatus.completado:
+          debugPrint(
+            'SyncService: ${resultado.enviadas} asistencias sincronizadas, '
+            '${resultado.rechazadas} rechazadas por el servidor.',
           );
-          if (distance <= rad) {
-            isWithinAllowedLocation = true;
-            locationName = location['nombre'];
-            break;
-          }
-        }
-
-        attendanceData.remove('createdAt');
-
-        // 3. DECIDIMOS A DÓNDE ENVIAR EL REGISTRO
-        if (isWithinAllowedLocation) {
-          // Si la ubicación es VÁLIDA, lo enviamos a la colección de asistencias
-          await _firestore.collection('asistencias').add({
-            ...attendanceData,
-            'locationName': locationName,
-            'timestamp': Timestamp.fromDate(
-              createdAtDate,
-            ), // HORA REAL DE LA MARCACIÓN
-            'syncedAt': FieldValue.serverTimestamp(),
-            'status': 'success_synced',
-          });
-          print(
-            'SyncService: Asistencia con clave $key VÁLIDA y sincronizada.',
+        case PendingAttendanceSyncStatus.sinAutorizacion:
+          debugPrint(
+            'SyncService: token ausente o vencido. Quedan '
+            '${resultado.pendientes} asistencias guardadas; se reintenta '
+            'después del próximo inicio de sesión con internet.',
           );
-        } else {
-          // Si la ubicación es INVÁLIDA, lo registramos como un intento de fraude
-          await _firestore.collection('asistencias_fraudulentas').add({
-            ...attendanceData,
-            'reason': 'Ubicación fuera de rango (verificado en sincronización)',
-            'timestamp': Timestamp.fromDate(createdAtDate),
-            'syncedAt': FieldValue.serverTimestamp(),
-          });
-          print(
-            'SyncService: Asistencia con clave $key INVÁLIDA y registrada como fraude.',
+        case PendingAttendanceSyncStatus.errorRed:
+          debugPrint(
+            'SyncService: falló la red. Quedan ${resultado.pendientes} '
+            'asistencias guardadas para el próximo intento.',
           );
-        }
-
-        successfullyProcessedKeys.add(key); // Marcamos para borrar de Hive
-      } catch (e) {
-        print('SyncService: Error al procesar la clave $key: $e');
+        case PendingAttendanceSyncStatus.sinPendientes:
+          break;
       }
-    }
 
-    if (successfullyProcessedKeys.isNotEmpty) {
-      await _pendingBox.deleteAll(successfullyProcessedKeys);
-      print(
-        'SyncService: ${successfullyProcessedKeys.length} registros procesados y eliminados de la caché.',
+      return resultado;
+    } catch (e, stack) {
+      // Red de seguridad: pase lo que pase, el candado se libera en el
+      // finally y la cola queda intacta para el siguiente intento.
+      debugPrint('SyncService: error inesperado al sincronizar: $e\n$stack');
+      return PendingAttendanceSyncResult(
+        estado: PendingAttendanceSyncStatus.errorRed,
+        pendientes: _attendanceQueue.cantidadPendientes,
       );
+    } finally {
+      _isSyncing = false;
+      debugPrint('SyncService: Sincronización finalizada. Desbloqueando.');
     }
+  }
 
-    _isSyncing = false;
-    print('SyncService: Sincronización completada. Desbloqueando.');
+  Future<String?> _leerToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('authToken');
   }
 }
