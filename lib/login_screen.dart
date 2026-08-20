@@ -28,7 +28,7 @@ class _LoginScreenState extends State<LoginScreen> {
   // NUEVO: Estado para ocultar/mostrar la contraseña
   bool _isObscure = true; 
 
-  final String _apiUrl = 'https://ceneris-web-oror.onrender.com/api';
+  final String _apiUrl = 'http://localhost:8000/api';
 
   @override
   void initState() {

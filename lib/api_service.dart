@@ -8,7 +8,7 @@ import 'package:intl/intl.dart';
 
 class ApiService {
   // URL base de tu API en Render
-  final String _baseUrl = 'https://ceneris-web-oror.onrender.com';
+  final String _baseUrl = 'http://localhost:8000';
 
   // --- 1. FUNCIÓN DE AYUDA PRIVADA ---
   // Obtiene el token y prepara los headers
