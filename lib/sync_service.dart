@@ -297,10 +297,16 @@ class SyncService {
     }
     if (code == 409) return const _SendResult(_SendStatus.duplicate);
 
-    // 401 y 403: SimpleJWT devuelve uno u otro según haya o no cabecera de
-    // autenticación válida. En ambos casos la respuesta es renovar, no borrar.
-    if (code == 401 || code == 403) {
-      return const _SendResult(_SendStatus.unauthorized);
+    // Solo el 401 es problema de sesión: `JWTAuthentication` envía cabecera
+    // `WWW-Authenticate`, así que un token caducado o inválido llega como 401.
+    if (code == 401) return const _SendResult(_SendStatus.unauthorized);
+
+    // El 403 de `RegistrarAsistenciaView` es una regla de negocio permanente
+    // (dispositivo no autorizado, día libre, sin turno programado, fraude).
+    // Renovar el token no lo arregla y detener el ciclo dejaría la cola
+    // atascada para siempre: se trata como rechazo definitivo.
+    if (code == 403) {
+      return _SendResult(_SendStatus.rejected, 'HTTP 403: ${_bodyAsText(response)}');
     }
 
     // Transitorios de servidor o infraestructura: se reintentan con backoff.

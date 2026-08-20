@@ -190,6 +190,37 @@ void main() {
       expect(service.requiresReLogin.value, isTrue);
     });
 
+    test('un 403 de regla de negocio no se confunde con sesion caducada',
+        () async {
+      // RegistrarAsistenciaView responde 403 en "dia libre", "sin turno
+      // programado" o "dispositivo no autorizado". Renovar el token no lo
+      // arregla: tratarlo como sesion caducada dejaria la cola atascada.
+      var llamadasDeRefresh = 0;
+      final refreshClient = MockClient((_) async {
+        llamadasDeRefresh++;
+        return http.Response('{"access":"token-nuevo"}', 200);
+      });
+
+      final client = MockClient(
+        (_) async => http.Response(
+          '{"detail":"Hoy esta registrado como tu Dia Libre."}',
+          403,
+        ),
+      );
+
+      await pendingBox.add(_marcaOffline());
+      final service = buildService(
+        attendanceClient: client,
+        refreshClient: refreshClient,
+      );
+      await service.syncPendingAttendances();
+
+      expect(llamadasDeRefresh, 0);
+      expect(service.requiresReLogin.value, isFalse);
+      expect(pendingBox.getAt(0)['intentos'], 1);
+      expect(pendingBox.getAt(0)['ultimo_error'], contains('403'));
+    });
+
     test('un 500 conserva la marca en la cola', () async {
       final client = MockClient((_) async => http.Response('boom', 500));
 

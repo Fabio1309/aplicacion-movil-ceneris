@@ -389,13 +389,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return;
       }
 
-      if (response.statusCode == 401 || response.statusCode == 403) {
+      if (response.statusCode == 401) {
         // Sesión caducada en pleno envío: la marca NO se pierde. El worker
         // renovará el token con el refresh y la subirá.
         await _encolarMarca(payload,
             mensaje: '⏳ Sesión caducada. Marca guardada, se subirá sola.');
         return;
       }
+
+      // Un 403 es una regla de negocio (día libre, sin turno programado,
+      // dispositivo no autorizado): hay que mostrarle el motivo al
+      // trabajador, no encolar una marca que el servidor nunca aceptará.
 
       final errorData = json.decode(utf8.decode(response.bodyBytes));
       if (mounted) {
