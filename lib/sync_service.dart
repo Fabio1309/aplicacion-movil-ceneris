@@ -4,11 +4,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'config/api_config.dart';
 import 'services/offline_login_event_queue.dart';
 
 class SyncService {
   SyncService({String? apiUrl, OfflineLoginEventQueue? offlineLoginQueue})
-      : _apiUrl = apiUrl ?? 'https://ceneris-web-oror.onrender.com/api',
+      : _apiUrl = apiUrl ?? ApiConfig.baseUrl,
         _offlineLoginQueue = offlineLoginQueue ?? OfflineLoginEventQueue();
 
   final Box _pendingBox = Hive.box('asistencias_pendientes');
