@@ -146,7 +146,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('authToken');
     if (token == null) {
-      _showErrorAndLogout('Sesión inválida.');
+      // Un login offline exitoso no genera token real (nunca hablo con
+      // el servidor), pero si dejo guardada esta marca. Sin ella, un
+      // trabajador sin señal quedaría botado de Marcar Asistencia justo
+      // cuando más lo necesita -- se usa lo que haya en caché en vez de
+      // exigir conexión.
+      final sesionOfflineValida =
+          prefs.getBool('offline_session_active') ?? false;
+      if (!sesionOfflineValida) {
+        _showErrorAndLogout('Sesión inválida.');
+        return;
+      }
+      _loadCachedConfig(prefs);
       return;
     }
 
