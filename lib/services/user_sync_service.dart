@@ -141,6 +141,19 @@ class UserSyncService {
     return lista.any((u) => u.username == username && u.activo);
   }
 
+  /// Devuelve el registro completo (nombre, dni, etc.) del usuario
+  /// autorizado que coincide con [username] en la ultima lista
+  /// sincronizada, o `null` si no existe o no esta activo. Se usa para
+  /// poder mostrar el nombre real del trabajador en un login offline,
+  /// sin necesitar conexion.
+  Future<AuthorizedUser?> obtenerUsuarioAutorizado(String username) async {
+    final lista = await _leerListaAlmacenada();
+    for (final u in lista) {
+      if (u.username == username && u.activo) return u;
+    }
+    return null;
+  }
+
   /// Momento (segun el reloj del servidor) de la ultima sincronizacion
   /// exitosa, o `null` si el dispositivo nunca ha sincronizado.
   Future<DateTime?> ultimaSincronizacion() async {
