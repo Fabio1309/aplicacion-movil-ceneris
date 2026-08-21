@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/intl.dart';
 import 'api_service.dart';
+import 'app_colors.dart';
 
 class SolicitudHorasExtraScreen extends StatefulWidget {
   const SolicitudHorasExtraScreen({super.key});
@@ -201,60 +202,149 @@ class _SolicitudHorasExtraScreenState extends State<SolicitudHorasExtraScreen> {
         : null;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Calendario Horas Extra')),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                _buildTableCalendar(),
-                const SizedBox(height: 10),
-                const Divider(thickness: 1),
-
-                // ZONA INFERIOR DINÁMICA
-                Expanded(
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(20.0),
-                    color: Colors.grey[100],
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        // CASO 1: Si hay solicitud, mostramos detalles
-                        if (solicitudDia != null)
-                          Expanded(
-                              child: SingleChildScrollView(
-                                  child: _buildDetalleSolicitud(solicitudDia))),
-
-                        // CASO 2: Si NO hay solicitud y hay día seleccionado, mostramos botón
-                        if (solicitudDia == null && _selectedDay != null) ...[
-                          const Icon(Icons.calendar_today,
-                              size: 60, color: Colors.blueGrey),
-                          const SizedBox(height: 10),
-                          Text(
-                            "No hay solicitudes para el ${_fechaAString(_selectedDay!)}",
-                            style: const TextStyle(
-                                fontSize: 16, color: Colors.grey),
-                          ),
-                          const SizedBox(height: 20),
-                          ElevatedButton.icon(
-                            onPressed: _abrirFormularioPopup,
-                            icon: const Icon(Icons.add_circle_outline),
-                            label: const Text("SOLICITAR HORAS EXTRA"),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 30, vertical: 15),
-                              textStyle: const TextStyle(fontSize: 16),
-                            ),
-                          ),
-                        ],
-                      ],
+      backgroundColor: const Color(0xFFF5F7FA),
+      body: SafeArea(
+        top: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // 1. CABECERA (mismo naranja del resto de la app; se extiende
+            // detrás de la barra de estado). Botón de volver a la derecha.
+            Container(
+              padding: EdgeInsets.fromLTRB(
+                  24, 20 + MediaQuery.of(context).padding.top, 24, 20),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppColors.primary,
+                    AppColors.primary.withOpacity(0.7),
+                  ],
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Calendario\nHoras Extra',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                      height: 1.2,
                     ),
                   ),
-                ),
-              ],
+                  Container(
+                    decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                              color: Colors.black.withOpacity(0.15),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4))
+                        ]),
+                    child: IconButton(
+                      icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                          color: AppColors.primary, size: 20),
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                  ),
+                ],
+              ),
             ),
+
+            // 2. CONTENIDO
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : Column(
+                      children: [
+                        _buildTableCalendar(),
+                        const SizedBox(height: 10),
+                        const Divider(thickness: 1),
+
+                        // ZONA INFERIOR DINÁMICA
+                        Expanded(
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(20.0),
+                            color: Colors.grey[100],
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                // CASO 1: Si hay solicitud, mostramos detalles
+                                if (solicitudDia != null)
+                                  Expanded(
+                                      child: SingleChildScrollView(
+                                          child: _buildDetalleSolicitud(
+                                              solicitudDia))),
+
+                                // CASO 2: Si NO hay solicitud y hay día seleccionado, mostramos botón
+                                if (solicitudDia == null &&
+                                    _selectedDay != null) ...[
+                                  const Icon(Icons.calendar_today,
+                                      size: 60, color: Colors.blueGrey),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    "No hay solicitudes para el ${_fechaAString(_selectedDay!)}",
+                                    style: const TextStyle(
+                                        fontSize: 16, color: Colors.grey),
+                                  ),
+                                  const SizedBox(height: 20),
+                                  ElevatedButton.icon(
+                                    onPressed: _abrirFormularioPopup,
+                                    icon: const Icon(
+                                        Icons.add_circle_outline),
+                                    label:
+                                        const Text("SOLICITAR HORAS EXTRA"),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.blue,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 30, vertical: 15),
+                                      textStyle:
+                                          const TextStyle(fontSize: 16),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
+
+            // 3. FOOTER: banda naranja plana
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppColors.primary,
+                    AppColors.primary.withOpacity(0.7),
+                  ],
+                ),
+              ),
+              child: const Center(
+                child: Text(
+                  'Registra tus horas extra a tiempo',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
