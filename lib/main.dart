@@ -29,9 +29,12 @@ Future<void> main() async {
   await Hive.initFlutter();
   await Hive.openBox('asistencias_pendientes');
   await Hive.openBox('eventos_login_offline'); // CAV-83
+  await Hive.openBox(SyncService.rejectedBoxName);
 
-  // 3. Inicia el servicio de sincronización en segundo plano
-  SyncService().startListening();
+  // 3. Inicia el worker de sincronización en segundo plano. Es una única
+  // instancia compartida para poder dispararlo también desde la UI
+  // (al marcar offline o al volver del background).
+  SyncService.instance.startListening();
 
   // 4. Lógica de sesión con SharedPreferences
   final prefs = await SharedPreferences.getInstance();
