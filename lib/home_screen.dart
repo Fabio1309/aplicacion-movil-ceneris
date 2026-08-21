@@ -15,6 +15,7 @@ import 'login_screen.dart';
 import 'dashboard_screen.dart';
 import 'app_colors.dart';
 import 'config/api_config.dart';
+import 'device_utils.dart';
 import 'sync_service.dart';
 import 'services/auth_token_provider.dart';
 import 'services/network_status.dart';
@@ -434,11 +435,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _logout() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.clear();
-    // El refresh vive en el almacén cifrado, no en prefs: hay que borrarlo
-    // aparte para no dejar una sesión renovable tras el logout.
-    await AuthTokenProvider().clearRefreshToken();
+    await cerrarSesion();
     if (mounted) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (context) => const LoginScreen()),

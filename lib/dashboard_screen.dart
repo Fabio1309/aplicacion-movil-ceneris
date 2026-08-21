@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app_colors.dart'; // Asegúrate de tener este archivo o define los colores
 
 // --- IMPORTS DE TUS PANTALLAS ---
+import 'device_utils.dart';
 import 'login_screen.dart';
 import 'home_screen.dart';
 import 'solicitud_horas_extra_screen.dart';
@@ -41,18 +42,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _logout() async {
-    final prefs = await SharedPreferences.getInstance();
-    
-    // 1. Rescatamos el ID del dispositivo ANTES de borrar todo
-    final String? deviceId = prefs.getString('unique_device_id');
-    
-    // 2. Ahora sí, limpiamos toda la sesión (borramos el token, nombre, dni, etc.)
-    await prefs.clear();
-    
-    // 3. Volvemos a guardar el ID del dispositivo para que sobreviva al cierre de sesión
-    if (deviceId != null) {
-      await prefs.setString('unique_device_id', deviceId);
-    }
+    await cerrarSesion();
 
     if (mounted) {
       Navigator.of(context).pushAndRemoveUntil(
