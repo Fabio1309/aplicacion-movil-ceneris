@@ -348,6 +348,43 @@ void main() {
       expect(rechazadas.getAt(0)['ultimo_error'], contains('422'));
     });
 
+    test('una marca con timestamp futuro se reintenta hasta que el servidor '
+        'la acepta, no se aparta', () async {
+      // El backend responde MARCA_FUTURA mientras su reloj no alcance el
+      // timestamp de la marca. Escenario real: el ancla del reloj confiable
+      // derivo unos segundos y la marca quedo adelantada.
+      var intentos = 0;
+      final client = MockClient((request) async {
+        intentos++;
+        if (intentos <= 3) {
+          return http.Response(
+            '{"detail":"MARCA_FUTURA: el timestamp es posterior a la hora '
+            'del servidor"}',
+            400,
+          );
+        }
+        return http.Response('{"id":1}', 201);
+      });
+
+      await pendingBox.add(_marcaOffline());
+      final service = buildService(attendanceClient: client);
+
+      // Los tres primeros ciclos NO deben tocar la marca: sigue pendiente,
+      // sin contarle rechazos y sin acercarla a la caja de revision.
+      for (var i = 0; i < 3; i++) {
+        await service.syncPendingAttendances();
+        expect(pendingBox.length, 1,
+            reason: 'una marca futura no se descarta ni se aparta');
+        expect(pendingBox.getAt(0)['intentos'], 0,
+            reason: 'MARCA_FUTURA no es un rechazo: no cuenta intentos');
+      }
+
+      // Cuando la hora del servidor alcanza el timestamp, entra sola.
+      await service.syncPendingAttendances();
+      expect(pendingBox.isEmpty, isTrue);
+      expect(Hive.box(SyncService.rejectedBoxName).isEmpty, isTrue);
+    });
+
     test('sin salida real a Internet no se hace ninguna peticion', () async {
       var seLlamo = false;
       final client = MockClient((_) async {

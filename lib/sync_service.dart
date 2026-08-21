@@ -358,6 +358,18 @@ class SyncService {
       return const _SendResult(_SendStatus.duplicate);
     }
 
+    // `MARCA_FUTURA`: el backend rechaza los timestamps por delante de su
+    // propia hora. NO es un rechazo definitivo, y por eso no se trata como
+    // tal: el mismo registro, sin cambiarle una coma, pasa a ser válido en
+    // cuanto el reloj del servidor alcanza su timestamp. Basta con que el
+    // ancla del reloj confiable haya derivado unos segundos para que una
+    // marca legítima caiga aquí; darla por rechazada la mandaría a la caja
+    // de revisión manual tras 20 intentos, que es justo perder planilla por
+    // un desfase de segundos. Se reintenta y entra sola.
+    if (code == 400 && cuerpo.contains('marca_futura')) {
+      return const _SendResult(_SendStatus.retryable, 'MARCA_FUTURA');
+    }
+
     return _SendResult(_SendStatus.rejected, 'HTTP $code: $cuerpo');
   }
 
