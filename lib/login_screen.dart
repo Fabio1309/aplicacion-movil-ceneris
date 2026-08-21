@@ -368,7 +368,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
     return Scaffold(
       backgroundColor: Colors.white,
-      body: SingleChildScrollView(
+      body: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => FocusScope.of(context).unfocus(),
+        child: SingleChildScrollView(
         child: SizedBox(
           height: size.height,
           child: Stack(
@@ -613,6 +616,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ],
           ),
+        ),
         ),
       ),
     );

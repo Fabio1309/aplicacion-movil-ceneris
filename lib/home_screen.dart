@@ -426,28 +426,41 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // 1. CABECERA
-              Row(
+        top: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // 1. CABECERA (mismo naranja del resto de la app; se extiende
+            // detrás de la barra de estado).
+            Container(
+              padding: EdgeInsets.fromLTRB(
+                  24, 20 + MediaQuery.of(context).padding.top, 24, 20),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppColors.primary,
+                    AppColors.primary.withOpacity(0.7),
+                  ],
+                ),
+              ),
+              child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Column(
+                  const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Control de',
+                      Text('Control de',
                           style: TextStyle(
                               fontSize: 14,
-                              color: Colors.grey,
+                              color: Colors.white70,
                               fontWeight: FontWeight.w500)),
                       Text('Asistencia',
                           style: TextStyle(
                               fontSize: 26,
                               fontWeight: FontWeight.bold,
-                              color: AppColors.text)),
+                              color: Colors.white)),
                     ],
                   ),
                   Container(
@@ -456,7 +469,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                              color: Colors.grey.withOpacity(0.1),
+                              color: Colors.black.withOpacity(0.15),
                               blurRadius: 10,
                               offset: const Offset(0, 4))
                         ]),
@@ -470,112 +483,145 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
+            ),
 
-              // CAV-64: BANNER DE DÍA FERIADO
-              if (_esFeriado) ...[
-                _buildBannerFeriado(),
-                const SizedBox(height: 16),
-              ],
-
-              // 2. SECCIÓN DINÁMICA: ¿HAY TURNO?
-              if (_showScheduleCard) ...[
-                if (_esPorHoras)
-                  _buildCardPorHoras() // AZUL
-                else
-                  _buildCardHorarioFijo(), // VERDE/ROJO
-              ] else ...[
-                _buildCardDiaLibre(), // GRIS (Día libre)
-              ],
-
-              const SizedBox(height: 20),
-
-              // 3. TARJETA DE ESTADO (GPS)
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                          color: Colors.grey.withOpacity(0.08),
-                          spreadRadius: 2,
-                          blurRadius: 15,
-                          offset: const Offset(0, 5))
-                    ]),
-                child: Row(
+            // 2. CONTENIDO
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    // CAV-64: BANNER DE DÍA FERIADO
+                    if (_esFeriado) ...[
+                      _buildBannerFeriado(),
+                      const SizedBox(height: 16),
+                    ],
+
+                    // SECCIÓN DINÁMICA: ¿HAY TURNO?
+                    if (_showScheduleCard) ...[
+                      if (_esPorHoras)
+                        _buildCardPorHoras() // AZUL
+                      else
+                        _buildCardHorarioFijo(), // VERDE/ROJO
+                    ] else ...[
+                      _buildCardDiaLibre(), // GRIS (Día libre)
+                    ],
+
+                    const SizedBox(height: 20),
+
+                    // TARJETA DE ESTADO (GPS)
                     Container(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: _statusMessage.contains('❌')
-                            ? Colors.red.withOpacity(0.1)
-                            : Colors.blue.withOpacity(0.1),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(Icons.location_on,
-                          size: 24,
-                          color: _statusMessage.contains('❌')
-                              ? Colors.red
-                              : Colors.blue),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(
+                                color: Colors.grey.withOpacity(0.08),
+                                spreadRadius: 2,
+                                blurRadius: 15,
+                                offset: const Offset(0, 5))
+                          ]),
+                      child: Row(
                         children: [
-                          Text('UBICACIÓN',
-                              style: TextStyle(
-                                  color: Colors.grey.shade500,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 4),
-                          Text(_statusMessage,
-                              style: const TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                  height: 1.2)),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: _statusMessage.contains('❌')
+                                  ? Colors.red.withOpacity(0.1)
+                                  : Colors.blue.withOpacity(0.1),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(Icons.location_on,
+                                size: 24,
+                                color: _statusMessage.contains('❌')
+                                    ? Colors.red
+                                    : Colors.blue),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('UBICACIÓN',
+                                    style: TextStyle(
+                                        color: Colors.grey.shade500,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold)),
+                                const SizedBox(height: 4),
+                                Text(_statusMessage,
+                                    style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        height: 1.2)),
+                              ],
+                            ),
+                          )
                         ],
                       ),
-                    )
+                    ),
+
+                    const Spacer(),
+
+                    // BOTONES
+                    _isLoading
+                        ? const Center(
+                            child: CircularProgressIndicator(
+                                color: AppColors.primary))
+                        : Row(
+                            children: [
+                              Expanded(
+                                  child: _ActionCard(
+                                      label: 'ENTRADA',
+                                      icon: Icons.login_rounded,
+                                      color: Colors.green,
+                                      isEnabled: _lastMarkingType != 'Entrada',
+                                      onTap: () =>
+                                          _markAttendance('Entrada'))),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                  child: _ActionCard(
+                                      label: 'SALIDA',
+                                      icon: Icons.logout_rounded,
+                                      color: Colors.redAccent,
+                                      isEnabled: _lastMarkingType != 'Salida',
+                                      onTap: () => _markAttendance('Salida'))),
+                            ],
+                          ),
+
+                    const SizedBox(height: 20),
                   ],
                 ),
               ),
+            ),
 
-              const Spacer(),
-
-              // 4. BOTONES
-              _isLoading
-                  ? const Center(
-                      child:
-                          CircularProgressIndicator(color: AppColors.primary))
-                  : Row(
-                      children: [
-                        Expanded(
-                            child: _ActionCard(
-                                label: 'ENTRADA',
-                                icon: Icons.login_rounded,
-                                color: Colors.green,
-                                isEnabled: _lastMarkingType != 'Entrada',
-                                onTap: () => _markAttendance('Entrada'))),
-                        const SizedBox(width: 16),
-                        Expanded(
-                            child: _ActionCard(
-                                label: 'SALIDA',
-                                icon: Icons.logout_rounded,
-                                color: Colors.redAccent,
-                                isEnabled: _lastMarkingType != 'Salida',
-                                onTap: () => _markAttendance('Salida'))),
-                      ],
-                    ),
-
-              const SizedBox(height: 10),
-              Center(
-                  child: Text("Área: ${widget.area}",
-                      style: TextStyle(
-                          color: Colors.grey.shade400, fontSize: 12))),
-            ],
-          ),
+            // 3. FOOTER: banda naranja plana (no montaña) con el área
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppColors.primary,
+                    AppColors.primary.withOpacity(0.7),
+                  ],
+                ),
+              ),
+              child: Center(
+                child: Text(
+                  "Área: ${widget.area}",
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

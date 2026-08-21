@@ -209,14 +209,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA), // Gris muy suave de fondo
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 1. CABECERA PERSONALIZADA
-              // 1. CABECERA PERSONALIZADA
-              Row(
+        top: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // 1. CABECERA CON FONDO NARANJA (paleta del login): se extiende
+            // detrás de la barra de estado para que se vea del mismo color,
+            // igual que en el login.
+            Container(
+              padding: EdgeInsets.fromLTRB(
+                  24, 20 + MediaQuery.of(context).padding.top, 24, 28),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppColors.primary,
+                    AppColors.primary.withOpacity(0.7),
+                  ],
+                ),
+              ),
+              child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   // Lado Izquierdo: Foto de Perfil + Textos
@@ -224,18 +237,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     children: [
                       // El Avatar clickeable
                       GestureDetector(
-                        onTap: () {
-                          Navigator.of(context).push(
+                        onTap: () async {
+                          await Navigator.of(context).push(
                             MaterialPageRoute(
                                 builder: (context) => const PerfilScreen()),
                           );
+                          // Al volver del perfil, refrescamos por si el
+                          // usuario actualizó su nombre/área ahí.
+                          _loadUserData();
                         },
                         child: Container(
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             boxShadow: [
                               BoxShadow(
-                                color: AppColors.primary.withOpacity(0.3),
+                                color: Colors.black.withOpacity(0.15),
                                 blurRadius: 8,
                                 offset: const Offset(0, 3),
                               ),
@@ -243,26 +259,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ),
                           child: const CircleAvatar(
                             radius: 26,
-                            backgroundColor: AppColors.primary,
-                            // Si a futuro agregas fotos reales a tu base de datos, 
+                            backgroundColor: Colors.white,
+                            // Si a futuro agregas fotos reales a tu base de datos,
                             // aquí usarías backgroundImage: NetworkImage(url)
-                            child: Icon(Icons.person, color: Colors.white, size: 30),
+                            child: Icon(Icons.person,
+                                color: AppColors.primary, size: 30),
                           ),
                         ),
                       ),
-                      
+
                       const SizedBox(width: 16), // Espacio entre foto y texto
-                      
+
                       // Textos de Bienvenida
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Hola, $_userName 👋',
+                            'Hola, $_userName',
                             style: const TextStyle(
                               fontSize: 22, // Ajustado ligeramente para encajar mejor
                               fontWeight: FontWeight.bold,
-                              color: AppColors.text,
+                              color: Colors.white,
                             ),
                           ),
                           const SizedBox(height: 4),
@@ -270,7 +287,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             _userArea,
                             style: TextStyle(
                               fontSize: 14,
-                              color: Colors.grey.shade600,
+                              color: Colors.white.withOpacity(0.85),
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -286,7 +303,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       borderRadius: BorderRadius.circular(12),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.grey.withOpacity(0.1),
+                          color: Colors.black.withOpacity(0.15),
                           blurRadius: 10,
                           offset: const Offset(0, 4),
                         ),
@@ -301,86 +318,160 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 ],
               ),
+            ),
 
-              const SizedBox(height: 30),
+            // 2. CONTENIDO (fondo blanco/gris)
+            Expanded(
+              child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text(
+                          '¿Qué deseas hacer hoy?',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.text,
+                          ),
+                        ),
 
-              const Text(
-                '¿Qué deseas hacer hoy?',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.text,
-                ),
+                        const SizedBox(height: 20),
+
+                        // GRILLA DE OPCIONES: se estira para llenar todo el
+                        // espacio disponible (sin hueco antes del footer),
+                        // en vez de un aspect ratio fijo.
+                        Expanded(
+                          child: Column(
+                            children: [
+                              Expanded(
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: DashboardCard(
+                                        icon: Icons.fingerprint,
+                                        title: 'Marcar\nAsistencia',
+                                        colorTheme: Colors.blueAccent,
+                                        onTap: _navigateToAsistencia,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 20),
+                                    Expanded(
+                                      child: DashboardCard(
+                                        icon: Icons.access_time_filled_rounded,
+                                        title: 'Solicitar\nH. Extra',
+                                        colorTheme: Colors.orangeAccent,
+                                        onTap: () {
+                                          Navigator.of(context).push(
+                                            MaterialPageRoute(
+                                                builder: (context) =>
+                                                    const SolicitudHorasExtraScreen()),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 20),
+                              Expanded(
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: DashboardCard(
+                                        icon: Icons.sick_rounded, // Icono más representativo
+                                        title: 'Justificar\nAusencia',
+                                        colorTheme: Colors.redAccent,
+                                        onTap: () {
+                                          Navigator.of(context).push(
+                                            MaterialPageRoute(
+                                                builder: (context) =>
+                                                    const JustificarAusenciaScreen()),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                    const SizedBox(width: 20),
+                                    Expanded(
+                                      child: DashboardCard(
+                                        icon: Icons.history_edu_rounded, // Icono de historial
+                                        title: 'Historial\nMarcaciones',
+                                        colorTheme: Colors.indigoAccent,
+                                        onTap: () {
+                                          Navigator.of(context).push(
+                                            MaterialPageRoute(
+                                                builder: (context) =>
+                                                    HistorialMarcacionesScreen()),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        const SizedBox(height: 32),
+                      ],
+                    ),
               ),
+            ),
 
-              const SizedBox(height: 20),
-
-              // 2. GRILLA DE OPCIONES
-              Expanded(
-                child: GridView.count(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 20,
-                  mainAxisSpacing: 20,
-                  childAspectRatio: 0.85, // Hace las tarjetas un poco más altas
-                  children: <Widget>[
-                    // Opción 1: Asistencia
-                    DashboardCard(
-                      icon: Icons.fingerprint,
-                      title: 'Marcar\nAsistencia',
-                      colorTheme: Colors.blueAccent,
-                      onTap: _navigateToAsistencia,
-                    ),
-
-                    // Opción 2: Horas Extra
-                    DashboardCard(
-                      icon: Icons.access_time_filled_rounded,
-                      title: 'Solicitar\nH. Extra',
-                      colorTheme: Colors.orangeAccent,
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                              builder: (context) =>
-                                  const SolicitudHorasExtraScreen()),
-                        );
-                      },
-                    ),
-
-                    // Opción 3: Justificar Ausencia
-                    DashboardCard(
-                      icon: Icons.sick_rounded, // Icono más representativo
-                      title: 'Justificar\nAusencia',
-                      colorTheme: Colors.redAccent,
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                              builder: (context) =>
-                                  const JustificarAusenciaScreen()),
-                        );
-                      },
-                    ),
-
-                    // Opción 4: Historial de Marcaciones
-                    DashboardCard(
-                      icon: Icons.history_edu_rounded, // Icono de historial
-                      title: 'Historial\nMarcaciones',
-                      colorTheme: Colors.indigoAccent,
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                              builder: (context) =>
-                                  HistorialMarcacionesScreen()),
-                        );
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+            // 3. FOOTER: silueta de montaña (como el login) con el logo
+            _buildFooter(),
+          ],
         ),
       ),
     );
   }
+
+  Widget _buildFooter() {
+    return ClipPath(
+      clipper: _MountainClipper(),
+      child: Container(
+        height: 130,
+        width: double.infinity,
+        padding: const EdgeInsets.only(top: 22),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              AppColors.primary,
+              AppColors.primary.withOpacity(0.7),
+            ],
+          ),
+        ),
+        alignment: Alignment.center,
+        child: Image.asset(
+          'assets/images/image.png',
+          height: 46,
+        ),
+      ),
+    );
+  }
+}
+
+// Silueta de montaña (un solo pico) para el borde superior del footer,
+// como la que forma el logo de la empresa.
+class _MountainClipper extends CustomClipper<Path> {
+  @override
+  Path getClip(Size size) {
+    final path = Path();
+    path.lineTo(0, size.height * 0.35);
+    path.lineTo(size.width * 0.5, 0);
+    path.lineTo(size.width, size.height * 0.35);
+    path.lineTo(size.width, size.height);
+    path.lineTo(0, size.height);
+    path.close();
+    return path;
+  }
+
+  @override
+  bool shouldReclip(covariant CustomClipper<Path> oldClipper) => false;
 }
 
 // 3. WIDGET DE TARJETA MEJORADO
@@ -406,12 +497,16 @@ class DashboardCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: const Color(0xFFF6FBFE),
+            width: 1,
+          ),
           boxShadow: [
             BoxShadow(
-              color: Colors.grey.withOpacity(0.08),
+              color: Colors.grey.withOpacity(0.18),
               spreadRadius: 2,
-              blurRadius: 15,
-              offset: const Offset(0, 5), // Sombra suave hacia abajo
+              blurRadius: 22,
+              offset: const Offset(0, 8), // Sombra suave hacia abajo
             ),
           ],
         ),

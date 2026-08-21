@@ -4,6 +4,7 @@ import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'app_colors.dart';
 import 'config/api_config.dart';
 
 class JustificarAusenciaScreen extends StatefulWidget {
@@ -152,25 +153,109 @@ class _JustificarAusenciaScreenState extends State<JustificarAusenciaScreen> {
     final datosDia = _dataPorFecha[fechaKey];
 
     return Scaffold(
-      appBar: AppBar(title: const Text("Gestión de Asistencia")),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                _buildCalendario(),
-                const Divider(thickness: 1, height: 1),
-                Expanded(
-                  child: Container(
-                    width: double.infinity,
-                    color: Colors.grey[50],
-                    padding: const EdgeInsets.all(20),
-                    child: datosDia != null
-                        ? _buildPanelDetalle(datosDia)
-                        : _buildEmptyState(),
+      backgroundColor: const Color(0xFFF5F7FA),
+      body: SafeArea(
+        top: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // 1. CABECERA (mismo naranja del resto de la app; se extiende
+            // detrás de la barra de estado). Botón de volver a la derecha.
+            Container(
+              padding: EdgeInsets.fromLTRB(
+                  24, 20 + MediaQuery.of(context).padding.top, 24, 20),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppColors.primary,
+                    AppColors.primary.withOpacity(0.7),
+                  ],
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Gestión de\nAsistencia',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                      height: 1.2,
+                    ),
                   ),
-                )
-              ],
+                  Container(
+                    decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                              color: Colors.black.withOpacity(0.15),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4))
+                        ]),
+                    child: IconButton(
+                      icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                          color: AppColors.primary, size: 20),
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                  ),
+                ],
+              ),
             ),
+
+            // 2. CONTENIDO
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : Column(
+                      children: [
+                        _buildCalendario(),
+                        const Divider(thickness: 1, height: 1),
+                        Expanded(
+                          child: Container(
+                            width: double.infinity,
+                            color: Colors.grey[50],
+                            padding: const EdgeInsets.all(20),
+                            child: datosDia != null
+                                ? _buildPanelDetalle(datosDia)
+                                : _buildEmptyState(),
+                          ),
+                        )
+                      ],
+                    ),
+            ),
+
+            // 3. FOOTER: banda naranja plana
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppColors.primary,
+                    AppColors.primary.withOpacity(0.7),
+                  ],
+                ),
+              ),
+              child: const Center(
+                child: Text(
+                  'Justifica tus faltas a tiempo',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
