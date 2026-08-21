@@ -11,10 +11,9 @@ class ApiConfig {
   /// IMPORTANTE: dejar en `false` antes de compilar para producción.
   static const bool useLocal = false;
 
-  /// Backend Django local (v2).
-  /// En el emulador Android, `10.0.2.2` es el alias hacia `localhost` de tu PC.
-  /// (En iOS Simulator sería `http://127.0.0.1:8000/api`).
-  static const String _localBaseUrl = 'http://10.0.2.2:8000/api';
+  /// Backend Django local (v2), vía `adb reverse tcp:8001 tcp:8001`
+  /// (mas confiable en este proyecto que el alias `10.0.2.2`).
+  static const String _localBaseUrl = 'http://127.0.0.1:8001/api';
 
   /// Producción en Render. Este valor NO modifica nada del servidor;
   /// solo indica a dónde apunta la app cuando `useLocal == false`.

@@ -1,10 +1,14 @@
 // lib/dashboard_screen.dart (DISEÑO MEJORADO)
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'app_colors.dart'; // Asegúrate de tener este archivo o define los colores
+import 'config/api_config.dart';
+import 'services/connectivity_checker.dart';
 
 // --- IMPORTS DE TUS PANTALLAS ---
+import 'device_utils.dart';
 import 'login_screen.dart';
 import 'home_screen.dart';
 import 'solicitud_horas_extra_screen.dart';
@@ -40,19 +44,131 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
   }
 
-  Future<void> _logout() async {
-    final prefs = await SharedPreferences.getInstance();
-    
-    // 1. Rescatamos el ID del dispositivo ANTES de borrar todo
-    final String? deviceId = prefs.getString('unique_device_id');
-    
-    // 2. Ahora sí, limpiamos toda la sesión (borramos el token, nombre, dni, etc.)
-    await prefs.clear();
-    
-    // 3. Volvemos a guardar el ID del dispositivo para que sobreviva al cierre de sesión
-    if (deviceId != null) {
-      await prefs.setString('unique_device_id', deviceId);
+  /// true si no hay señal en absoluto, O si hay señal pero no se puede
+  /// completar una conexión real con el servidor (caso 2: wifi/datos
+  /// prendidos, pero sin internet real detrás).
+  Future<bool> _sinInternetReal() async {
+    if (await ConnectivityChecker().sinSenal()) return true;
+    try {
+      await http
+          .get(Uri.parse('${ApiConfig.baseUrl}/token/'))
+          .timeout(const Duration(seconds: 4));
+      return false;
+    } catch (_) {
+      return true;
     }
+  }
+
+  Future<void> _logout() async {
+    // Si no hay internet real (ni señal, ni señal-sin-internet), cerrar
+    // sesión implica que va a tener que volver a escribir su usuario y
+    // contraseña para poder entrar de nuevo (aunque el login offline
+    // seguirá funcionando bien). Se avisa antes por si fue un toque
+    // accidental.
+    if (await _sinInternetReal()) {
+      if (!mounted) return;
+      final confirmar = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  height: 64,
+                  width: 64,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.orange.shade50,
+                  ),
+                  child: Icon(
+                    Icons.wifi_off_rounded,
+                    color: Colors.orange.shade800,
+                    size: 32,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                const Text(
+                  'Estás sin conexión',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.text,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Si cierras sesión ahora vas a tener que volver a '
+                  'escribir tu usuario y contraseña la próxima vez que '
+                  'entres.\n\n¿Seguro que quieres cerrar sesión?',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey.shade600,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.of(context).pop(false),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          side: BorderSide(color: Colors.grey.shade300),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          'Cancelar',
+                          style: TextStyle(
+                            color: AppColors.text,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.of(context).pop(true),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red.shade600,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          'Cerrar sesión',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      if (confirmar != true) return;
+    }
+
+    // cerrarSesion() conserva el unique_device_id (si no, el candado
+    // "1 trabajador = 1 celular" del backend bloquearía el próximo login)
+    // y elimina el refresh cifrado, para no dejar una sesión renovable.
+    await cerrarSesion();
 
     if (mounted) {
       Navigator.of(context).pushAndRemoveUntil(

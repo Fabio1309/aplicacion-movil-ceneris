@@ -1,10 +1,11 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'services/pending_attendance_queue.dart';
+import 'package:hive/hive.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
 import 'config/api_config.dart';
+import 'sync_service.dart';
 
 class HistorialMarcacionesScreen extends StatefulWidget {
   const HistorialMarcacionesScreen({super.key});
@@ -31,8 +32,10 @@ class _HistorialMarcacionesScreenState
     List<Map<String, dynamic>> listaCombinada = [];
 
     // 1. CARGAR LOCALES (OFFLINE / PENDIENTES)
-    // Leemos de la cola lo que aún no se ha subido
-    for (final data in PendingAttendanceQueue().pendientes) {
+    // Leemos de la cola del worker lo que aún no se ha subido
+    var box = Hive.box(SyncService.pendingBoxName);
+    for (var key in box.keys) {
+      final data = box.get(key);
       listaCombinada.add({
         'tipo': data['tipo_marcacion'],
         'fecha_hora': data['timestamp'], // Viene en ISO String
@@ -40,7 +43,7 @@ class _HistorialMarcacionesScreenState
         'es_offline': true, // BANDERA IMPORTANTE
         // Si el servidor rechazó esta marcación, el motivo viaja aquí
         // para poder mostrarlo en vez de dejarla como "pendiente" eterna.
-        'error_sync': data['_ultimo_error'],
+        'error_sync': data['ultimo_error'],
       });
     }
 

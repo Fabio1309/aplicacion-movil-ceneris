@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'config/api_config.dart';
 
 class ApiService {
+  // URL base de la API (incluye el sufijo /api). Config centralizada.
   final String _baseUrl = ApiConfig.baseUrl;
 
   // --- 1. FUNCIÓN DE AYUDA PRIVADA ---

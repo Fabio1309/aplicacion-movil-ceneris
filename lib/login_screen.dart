@@ -9,11 +9,25 @@ import 'dashboard_screen.dart';
 import 'app_colors.dart';
 import 'config/api_config.dart';
 import 'sync_service.dart';
+import 'services/auth_token_provider.dart';
 import 'services/secure_credential_store.dart';
 import 'services/trusted_clock.dart';
 import 'services/offline_login_validator.dart';
 import 'services/user_sync_service.dart';
 import 'services/offline_login_event_queue.dart';
+import 'services/connectivity_checker.dart';
+
+/// Motivo por el que se cayo al login offline, para poder mostrar un
+/// mensaje distinto segun el caso (3 casos de conectividad del login).
+enum _MotivoModoOffline {
+  /// Caso 3: sin ninguna señal (modo avion, datos apagados, sin cobertura).
+  sinSenal,
+
+  /// Caso 2: hay señal (wifi/datos) pero no se pudo completar el login
+  /// contra el servidor (timeout, sin salida real a internet, servidor
+  /// no responde).
+  sinInternetReal,
+}
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -31,9 +45,10 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   String? _deviceId;
   // NUEVO: Estado para ocultar/mostrar la contraseña
-  bool _isObscure = true; 
+  bool _isObscure = true;
 
   final String _apiUrl = ApiConfig.baseUrl;
+  final ConnectivityChecker _connectivityChecker = ConnectivityChecker();
 
   @override
   void initState() {
@@ -89,6 +104,19 @@ class _LoginScreenState extends State<LoginScreen> {
     final password = _passwordController.text.trim();
 
     try {
+      // Caso 3 (sin cobertura / modo avion / datos apagados): ni
+      // siquiera intentamos contactar al servidor, vamos directo a
+      // offline en vez de esperar un timeout que sabemos que va a
+      // fallar igual.
+      if (await _connectivityChecker.sinSenal()) {
+        await _attemptOfflineLogin(
+          username: dni,
+          password: password,
+          motivo: _MotivoModoOffline.sinSenal,
+        );
+        return;
+      }
+
       final Uri loginUri = Uri.parse('$_apiUrl/token/');
       final requestBody = json.encode({
         'username': dni,
@@ -116,7 +144,7 @@ class _LoginScreenState extends State<LoginScreen> {
             },
             body: requestBody,
           )
-          .timeout(const Duration(seconds: 45));
+          .timeout(const Duration(seconds: 15));
 
       // Antifraude de reloj: el login es el primer (y a veces el único)
       // contacto con el servidor, así que es la mejor oportunidad para
@@ -128,6 +156,10 @@ class _LoginScreenState extends State<LoginScreen> {
       if (response.statusCode == 200) {
         final responseData = json.decode(utf8.decode(response.bodyBytes));
         final token = responseData['access'];
+        // El `refresh` de SimpleJWT se descartaba: sin él, un token que
+        // caducaba durante el periodo sin conexión dejaba las marcas
+        // pendientes imposibles de subir hasta un re-login manual.
+        final refreshToken = responseData['refresh'] as String?;
         final userData = responseData['user'];
 
         if (token == null || userData == null) {
@@ -143,7 +175,16 @@ class _LoginScreenState extends State<LoginScreen> {
         final telefonoReal = userData['telefono'] ?? 'No registrado';
 
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('authToken', token);
+        // Guarda el `access` en prefs y el `refresh` en el almacén cifrado
+        // (Keystore/Keychain), para poder renovar la sesión en segundo plano
+        // antes de subir las marcas que quedaron en cola.
+        await AuthTokenProvider().saveTokens(
+          access: token,
+          refresh: refreshToken,
+        );
+        // Login online exitoso: ya no estamos en una sesión offline
+        // "de emergencia" (si veníamos de una).
+        await prefs.setBool('offline_session_active', false);
         await prefs.setString('user_nombre', nombreUsuario);
         await prefs.setString('user_area', areaUsuario);
         await prefs.setString('user_username', usuarioSistema);
@@ -173,20 +214,11 @@ class _LoginScreenState extends State<LoginScreen> {
         // hubo token, y si el token viejo venció el backend respondía
         // 401: en ambos casos las asistencias quedaron esperando. Este
         // es el primer momento en que hay un token fresco para subirlas.
-        final resultadoAsistencias =
-            await SyncService.instance.syncPendingAttendances();
-        if (resultadoAsistencias.enviadas > 0 && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                '✅ Se sincronizaron ${resultadoAsistencias.enviadas} '
-                'marcación(es) que estaban guardadas sin conexión.',
-              ),
-              backgroundColor: Colors.green.shade700,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
+        // No se espera el resultado: vaciar una cola de meses de faena
+        // puede tardar mucho y el trabajador no tiene por qué mirar la
+        // pantalla de login mientras tanto. El worker avisa del avance
+        // por `SyncService.instance.pendingCount`.
+        SyncService.instance.scheduleSync();
 
         // CAV-82: refrescamos la lista de usuarios autorizados en todo
         // login online exitoso (no solo al entrar a Marcar Asistencia),
@@ -233,11 +265,16 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     } catch (e) {
       print("Error en login online: $e");
-      // CAV-80: si el login contra el servidor no se pudo completar
-      // (por ejemplo, sin conexión), intentamos validar localmente
-      // contra las credenciales guardadas la última vez que este
-      // usuario entró bien en este mismo dispositivo.
-      await _attemptOfflineLogin(username: dni, password: password);
+      // Caso 2 (hay señal pero no se pudo completar: timeout, sin
+      // salida real a internet, servidor no responde) o CAV-80
+      // generico: intentamos validar localmente contra las
+      // credenciales guardadas la última vez que este usuario entró
+      // bien en este mismo dispositivo.
+      await _attemptOfflineLogin(
+        username: dni,
+        password: password,
+        motivo: _MotivoModoOffline.sinInternetReal,
+      );
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -248,6 +285,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _attemptOfflineLogin({
     required String username,
     required String password,
+    required _MotivoModoOffline motivo,
   }) async {
     final validator = OfflineLoginValidator(
       userSyncService: UserSyncService(apiUrl: _apiUrl),
@@ -275,17 +313,39 @@ class _LoginScreenState extends State<LoginScreen> {
       );
     }
 
+    // Un login offline exitoso NO genera un token real (nunca se pudo
+    // hablar con el servidor). Sin esto, pantallas como "Marcar
+    // Asistencia" exigirían un token y botarían al trabajador de
+    // vuelta al login -- justo cuando más necesita poder trabajar
+    // (sin señal, posiblemente semanas). Guardamos una marca de
+    // "sesión local válida" y los datos que sí tenemos guardados
+    // localmente, para que esas pantallas puedan seguir funcionando
+    // con lo que hay en caché en vez de exigir conexión.
+    final usuarioAutorizado = await UserSyncService(apiUrl: _apiUrl)
+        .obtenerUsuarioAutorizado(username);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('offline_session_active', true);
+    await prefs.setString('user_dni', usuarioAutorizado?.dni ?? username);
+    await prefs.setString(
+      'user_nombre',
+      usuarioAutorizado?.nombreCompleto ?? username,
+    );
+
     if (mounted) {
+      final mensaje = motivo == _MotivoModoOffline.sinSenal
+          ? 'Sin señal. Sesión iniciada SIN CONEXIÓN'
+          : 'Tienes señal pero sin internet. Sesión iniciada SIN CONEXIÓN';
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Row(
+          content: Row(
             children: [
-              Icon(Icons.wifi_off_rounded, color: Colors.white),
-              SizedBox(width: 10),
+              const Icon(Icons.wifi_off_rounded, color: Colors.white),
+              const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Sesión iniciada SIN CONEXIÓN',
-                  style: TextStyle(
+                  mensaje,
+                  style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 15,
                   ),
