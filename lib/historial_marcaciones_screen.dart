@@ -4,6 +4,7 @@ import 'package:hive/hive.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
+import 'app_colors.dart';
 import 'config/api_config.dart';
 import 'sync_service.dart';
 
@@ -92,28 +93,106 @@ class _HistorialMarcacionesScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
-      appBar: AppBar(
-        title: const Text("Historial de Marcas",
-            style: TextStyle(color: Colors.black)),
-        backgroundColor: Colors.white,
-        elevation: 1,
-        iconTheme: const IconThemeData(color: Colors.black),
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _cargarDatos,
-              child: _marcaciones.isEmpty
-                  ? _buildEmptyState()
-                  : ListView.builder(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: _marcaciones.length,
-                      itemBuilder: (context, index) {
-                        final item = _marcaciones[index];
-                        return _buildMarcacionCard(item);
-                      },
+      body: SafeArea(
+        top: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // 1. CABECERA (mismo naranja del resto de la app; se extiende
+            // detrás de la barra de estado). Botón de volver a la derecha,
+            // en blanco con ícono naranja, igual que en las demás pantallas.
+            Container(
+              padding: EdgeInsets.fromLTRB(
+                  24, 20 + MediaQuery.of(context).padding.top, 24, 20),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppColors.primary,
+                    AppColors.primary.withOpacity(0.7),
+                  ],
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Historial de\nMarcas',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                      height: 1.2,
+                    ),
+                  ),
+                  Container(
+                    decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                              color: Colors.black.withOpacity(0.15),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4))
+                        ]),
+                    child: IconButton(
+                      icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                          color: AppColors.primary, size: 20),
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // 2. CONTENIDO
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : RefreshIndicator(
+                      onRefresh: _cargarDatos,
+                      child: _marcaciones.isEmpty
+                          ? _buildEmptyState()
+                          : ListView.builder(
+                              padding: const EdgeInsets.all(16),
+                              itemCount: _marcaciones.length,
+                              itemBuilder: (context, index) {
+                                final item = _marcaciones[index];
+                                return _buildMarcacionCard(item);
+                              },
+                            ),
                     ),
             ),
+
+            // 3. FOOTER: banda naranja plana con un recordatorio
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppColors.primary,
+                    AppColors.primary.withOpacity(0.7),
+                  ],
+                ),
+              ),
+              child: const Center(
+                child: Text(
+                  'Recuerda marcar tus asistencias',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -142,12 +221,13 @@ class _HistorialMarcacionesScreenState
             ? Border.all(
                 color: Colors.orange.withOpacity(0.5),
                 width: 1.5) // Borde naranja si es offline
-            : Border.all(color: Colors.grey.shade100),
+            : Border.all(color: const Color(0xFFF6FBFE)),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+            color: Colors.grey.withOpacity(0.18),
+            spreadRadius: 1,
+            blurRadius: 18,
+            offset: const Offset(0, 6),
           ),
         ],
       ),

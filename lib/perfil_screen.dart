@@ -80,13 +80,14 @@ class _PerfilScreenState extends State<PerfilScreen> {
                   Container(
                     padding: const EdgeInsets.all(4),
                     decoration: const BoxDecoration(
-                      color: Colors.white,
+                      color: AppColors.melon,
                       shape: BoxShape.circle,
                     ),
                     child: const CircleAvatar(
                       radius: 50,
-                      backgroundColor: Colors.grey,
-                      child: Icon(Icons.person, size: 60, color: Colors.white),
+                      backgroundColor: AppColors.melon,
+                      child: Icon(Icons.person,
+                          size: 60, color: AppColors.text),
                     ),
                   ),
                 ],
