@@ -14,6 +14,8 @@ import 'services/offline_login_validator.dart';
 import 'services/user_sync_service.dart';
 import 'services/offline_login_event_queue.dart';
 import 'services/connectivity_checker.dart';
+import 'services/network_status.dart';
+import 'sync_service.dart';
 
 /// Motivo por el que se cayo al login offline, para poder mostrar un
 /// mensaje distinto segun el caso (3 casos de conectividad del login).
@@ -210,6 +212,21 @@ class _LoginScreenState extends State<LoginScreen> {
         } catch (e) {
           print('No se pudo sincronizar usuarios autorizados: $e');
         }
+
+        // FIX: un login online exitoso PRUEBA la conexión y deja un token
+        // fresco. Antes, tras entrar sin conexión y volver a loguearse online,
+        // las marcas encoladas seguían pendientes hasta el próximo evento de
+        // red, hasta que el usuario reabría la app, o hasta el heartbeat de
+        // 15 min del SyncService. Aquí:
+        //  1) invalidamos el chequeo de red cacheado (que pudo quedar en
+        //     "sin internet" desde la sesión offline), para que la próxima
+        //     verificación sea fresca, y
+        //  2) disparamos la sincronización de la cola YA, con el token nuevo.
+        // scheduleSync() es fire-and-forget y vuelve a chequear conexión por
+        // dentro, así que si aún no hay salida real a Internet no hace daño:
+        // simplemente conserva la cola.
+        NetworkStatus.instance.invalidateCache();
+        SyncService.instance.scheduleSync();
 
         _proceedToDashboard();
       } else {
